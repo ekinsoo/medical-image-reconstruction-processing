@@ -1,0 +1,1300 @@
+﻿\documentclass[11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{amsmath, amssymb}
+\usepackage{hyperref}
+
+\graphicspath{{figures/}}
+
+\lstdefinestyle{matlabstyle}{
+    language=Matlab,
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{blue!60!black},
+    commentstyle=\color{green!40!black},
+    stringstyle=\color{red!50!black},
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    stepnumber=1,
+    numbersep=8pt,
+    breaklines=true,
+    frame=single,
+    columns=fullflexible,
+    keepspaces=true
+}
+
+\newcommand{\maybegraphics}[2][]{%
+    \IfFileExists{#2}{\includegraphics[#1]{#2}}{\fbox{\parbox{0.88\linewidth}{Run the corresponding MATLAB cell to generate \texttt{#2}.}}}%
+}
+
+\title{EEE 475/575 Medical Image Reconstruction and Processing\\Homework 4}
+\author{Özgür Ekin Sönmez}
+\date{29 April 2026}
+
+\begin{document}
+\maketitle
+
+\section*{GenAI Usage Disclosure}
+I used OpenAI Codex (GPT-5) as a coding and writing assistant for this homework. The tool was used to draft the MATLAB implementation, organize the solution into runnable cells, create helper functions for reconstruction and visualization, and prepare this LaTeX report template. I reviewed and ran the code myself and remain responsible for the correctness, interpretation, and final submitted material.
+
+\section*{Part I -- Multi-Coil Reconstruction}
+
+\subsection*{1.1 Display MRI Images}
+The magnitude images show the spatially varying signal received by each coil. The phase images differ substantially across coils because each channel has its own complex sensitivity profile. The k-space spectra have most of their energy concentrated near the center, as expected for MR images. Comparing \texttt{map1} and \texttt{map2}, both maps have smooth coil sensitivity profiles, but \texttt{map2} contains small magnitude and phase mismatches. The measured mean absolute difference was $0.359498$. Because OLC and SENSE use the sensitivity maps directly, these spatially varying mismatches can cause structured reconstruction errors, especially in SENSE.
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part1_1_coil_image_magnitude.png}
+\caption{Magnitude of the fully sampled coil images.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part1_1_coil_image_phase.png}
+\caption{Phase of the fully sampled coil images.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part1_1_coil_kspace_spectrum.png}
+\caption{Log-scaled k-space spectra of the coil images.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part1_1_map1_magnitude.png}
+\caption{Magnitude of coil sensitivity map1.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part1_1_map1_phase.png}
+\caption{Phase of coil sensitivity map1.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part1_1_map2_magnitude.png}
+\caption{Magnitude of coil sensitivity map2.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part1_1_map2_phase.png}
+\caption{Phase of coil sensitivity map2.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part1_1_map_difference.png}
+\caption{Absolute sensitivity-map difference $|\texttt{map2}-\texttt{map1}|$.}
+\end{figure}
+
+\paragraph{Code}
+\begin{lstlisting}[style=matlabstyle]
+M = fft2c(im);
+
+show_montage(abs(im), [], 'Part 1.1: coil image magnitude', ...
+    fullfile(figDir, 'part1_1_coil_image_magnitude.png'));
+show_montage(angle(im), [-pi pi], 'Part 1.1: coil image phase', ...
+    fullfile(figDir, 'part1_1_coil_image_phase.png'));
+show_montage(kspace_spectrum(M), [], 'Part 1.1: coil k-space spectra', ...
+    fullfile(figDir, 'part1_1_coil_kspace_spectrum.png'));
+
+show_montage(abs(map1), [], 'Part 1.1: map1 sensitivity magnitude', ...
+    fullfile(figDir, 'part1_1_map1_magnitude.png'));
+show_montage(angle(map1), [-pi pi], 'Part 1.1: map1 sensitivity phase', ...
+    fullfile(figDir, 'part1_1_map1_phase.png'));
+
+show_montage(abs(map2), [], 'Part 1.1: map2 sensitivity magnitude', ...
+    fullfile(figDir, 'part1_1_map2_magnitude.png'));
+show_montage(angle(map2), [-pi pi], 'Part 1.1: map2 sensitivity phase', ...
+    fullfile(figDir, 'part1_1_map2_phase.png'));
+
+map_diff = abs(map2 - map1);
+show_montage(map_diff, [], 'Part 1.1: absolute sensitivity difference |map2-map1|', ...
+    fullfile(figDir, 'part1_1_map_difference.png'));
+fprintf('Part 1.1: mean |map2-map1| = %.6g\n', mean(map_diff(:)));
+\end{lstlisting}
+
+\subsection*{1.2 OLC Reconstruction Using map1}
+For independent unit-variance coil noise, the optimally weighted linear combination is
+\[
+\hat{m} = \frac{\sum_l c_l^* m_l}{\sum_l |c_l|^2}
+\]
+The result from \texttt{map1}, after normalization by the 95th percentile intensity, is used as the reference image for Parts I and II.
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.55\linewidth]{figures/part1_2_olc_map1.png}
+\caption{OLC reconstruction using map1.}
+\end{figure}
+
+\textbf{MATLAB output:} The reference maximum value for Parts I-II is \texttt{max\_val} = 2.28805.
+
+\paragraph{Code}
+\begin{lstlisting}[style=matlabstyle]
+olc_map1 = normalize95(abs(olc_recon(im, map1)));
+max_val_sense = max(olc_map1(:));
+ref_sense = olc_map1;
+
+show_single_image(olc_map1, [0 max_val_sense], ...
+    'Part 1.2: OLC magnitude using map1', ...
+    fullfile(figDir, 'part1_2_olc_map1.png'));
+
+fprintf('Part 1.2: max_val for Parts I-II = %.6g\n', max_val_sense);
+\end{lstlisting}
+
+\subsection*{1.3 OLC Reconstruction Using map2}
+Using \texttt{map2} changes the coil-combination weights. The reconstruction is still recognizable, but the PSNR decreases to 18.6567 dB relative to the map1 OLC reference. The error is spatially structured because the sensitivity-map mismatch varies across the image rather than acting like spatially uniform noise.
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part1_3_olc_map2_and_error.png}
+\caption{OLC reconstruction using map2 and absolute error relative to the map1 OLC reference.}
+\end{figure}
+
+\textbf{MATLAB output:} PSNR = 18.6567 dB, SSIM = 0.884596.
+
+\paragraph{Code}
+\begin{lstlisting}[style=matlabstyle]
+olc_map2 = normalize95(abs(olc_recon(im, map2)));
+metrics_13 = compute_metrics(olc_map2, ref_sense, max_val_sense);
+
+show_image_and_error(olc_map2, ref_sense, max_val_sense, ...
+    'Part 1.3: OLC using map2', ...
+    fullfile(figDir, 'part1_3_olc_map2_and_error.png'));
+
+print_metrics('Part 1.3 OLC map2', metrics_13);
+\end{lstlisting}
+
+\subsection*{1.4 SoS Reconstruction}
+The square-root sum-of-squares reconstruction is
+\[
+\hat m_{\mathrm{SoS}} = \sqrt{\sum_l |m_l|^2}.
+\]
+SoS does not require coil sensitivity maps, which makes it robust and simple. However, it retains coil sensitivity shading and intensity nonuniformity. The anatomy is visually recognizable, but the intensity profile differs from the OLC reference, which explains why SSIM can be reduced even when the PSNR is reasonable.
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part1_4_sos_and_error.png}
+\caption{SoS reconstruction and absolute error relative to the OLC reference.}
+\end{figure}
+
+\textbf{MATLAB output:} PSNR = 25.6636 dB, SSIM = 0.658325.
+
+\paragraph{Code}
+\begin{lstlisting}[style=matlabstyle]
+sos_part1 = normalize95(sos_combine(im));
+metrics_14 = compute_metrics(sos_part1, ref_sense, max_val_sense);
+
+show_image_and_error(sos_part1, ref_sense, max_val_sense, ...
+    'Part 1.4: SoS reconstruction', ...
+    fullfile(figDir, 'part1_4_sos_and_error.png'));
+
+print_metrics('Part 1.4 SoS', metrics_14);
+\end{lstlisting}
+
+\section*{Part II -- SENSE}
+
+\subsection*{2.1 Undersampled Images}
+The undersampling operation decimates k-space and then applies the inverse centered FFT. In the image domain this produces aliasing: voxels from different spatial locations fold onto the same measured pixel. The k-space spectra show the retained decimated sampling grid. For $R_x=1,R_y=2$, every other phase-encode line is retained; for $R_x=1,R_y=4$, only one out of four columns is retained; and for $R_x=2,R_y=2$, decimation occurs in both directions. The aliasing becomes more severe as the total acceleration factor increases.
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part2_1_images_Rx1_Ry2.png}
+\caption{Aliased coil images for $R_x=1$, $R_y=2$.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part2_1_kspace_Rx1_Ry2.png}
+\caption{Undersampled k-space spectra for $R_x=1$, $R_y=2$.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part2_1_images_Rx1_Ry4.png}
+\caption{Aliased coil images for $R_x=1$, $R_y=4$.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part2_1_kspace_Rx1_Ry4.png}
+\caption{Undersampled k-space spectra for $R_x=1$, $R_y=4$.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part2_1_images_Rx2_Ry2.png}
+\caption{Aliased coil images for $R_x=2$, $R_y=2$.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part2_1_kspace_Rx2_Ry2.png}
+\caption{Undersampled k-space spectra for $R_x=2$, $R_y=2$.}
+\end{figure}
+
+\paragraph{Code}
+\begin{lstlisting}[style=matlabstyle]
+undersampled_tests = struct();
+for caseIdx = 1:size(sense_cases, 1)
+    Rx = sense_cases(caseIdx, 1);
+    Ry = sense_cases(caseIdx, 2);
+    [imu, Mu] = undersample(im, Rx, Ry);
+
+    fieldName = sprintf('Rx%d_Ry%d', Rx, Ry);
+    undersampled_tests.(fieldName).imu = imu;
+    undersampled_tests.(fieldName).Mu = Mu;
+
+    show_montage(abs(imu), [], sprintf('Part 2.1: aliased images, Rx=%d, Ry=%d', Rx, Ry), ...
+        fullfile(figDir, sprintf('part2_1_images_Rx%d_Ry%d.png', Rx, Ry)));
+    show_montage(kspace_spectrum(Mu), [], sprintf('Part 2.1: undersampled k-space, Rx=%d, Ry=%d', Rx, Ry), ...
+        fullfile(figDir, sprintf('part2_1_kspace_Rx%d_Ry%d.png', Rx, Ry)));
+end
+\end{lstlisting}
+
+\subsection*{2.2 SENSE Sanity Check}
+For $R_x=R_y=1$ and $\lambda=0$, SENSE reduces to the same voxelwise OLC reconstruction used in Part 1.2. Therefore PSNR should be extremely large and SSIM should be essentially 1, up to numerical precision.
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part2_2_sense_Rx1_Ry1_lambda0.png}
+\caption{SENSE reconstruction for $R_x=R_y=1$, $\lambda=0$.}
+\end{figure}
+
+\textbf{MATLAB output:} PSNR = 321.4636 dB, SSIM = 1.000000.
+
+\paragraph{Code}
+\begin{lstlisting}[style=matlabstyle]
+[imu_11, ~] = undersample(im, 1, 1);
+im_sense_11 = l2sense(imu_11, map1, 1, 1, 0);
+metrics_22 = compute_metrics(im_sense_11, ref_sense, max_val_sense);
+
+show_image_and_error(im_sense_11, ref_sense, max_val_sense, ...
+    'Part 2.2: SENSE sanity check, Rx=1, Ry=1, lambda=0', ...
+    fullfile(figDir, 'part2_2_sense_Rx1_Ry1_lambda0.png'));
+
+print_metrics('Part 2.2 SENSE Rx=1 Ry=1 lambda=0', metrics_22);
+\end{lstlisting}
+
+\subsection*{2.3 Unregularized SENSE}
+With acceleration, each aliased measurement corresponds to multiple source voxels. Without regularization, the inversion can become poorly conditioned, causing artifact and noise amplification. After correcting the centered aliasing indices, the $R_x=1,R_y=2$ and $R_x=2,R_y=2$ cases are reconstructed relatively well. However, the error images still show residual spatially varying error and noise amplification. The $R_x=1,R_y=4$ case remains the most difficult case because four source voxels must be unfolded from each aliased voxel.
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part2_3_sense_Rx1_Ry2_lambda0.png}
+\caption{Unregularized SENSE for $R_x=1$, $R_y=2$.}
+\end{figure}
+\textbf{MATLAB output:} PSNR = 34.7076 dB, SSIM = 0.954200.
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part2_3_sense_Rx1_Ry4_lambda0.png}
+\caption{Unregularized SENSE for $R_x=1$, $R_y=4$.}
+\end{figure}
+\textbf{MATLAB output:} PSNR = 18.5253 dB, SSIM = 0.643093.
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part2_3_sense_Rx2_Ry2_lambda0.png}
+\caption{Unregularized SENSE for $R_x=2$, $R_y=2$.}
+\end{figure}
+\textbf{MATLAB output:} PSNR = 29.7818 dB, SSIM = 0.894558.
+
+\paragraph{Code}
+\begin{lstlisting}[style=matlabstyle]
+sense_unreg = struct();
+for caseIdx = 1:size(sense_cases, 1)
+    Rx = sense_cases(caseIdx, 1);
+    Ry = sense_cases(caseIdx, 2);
+    [imu, ~] = undersample(im, Rx, Ry);
+
+    im_sense = l2sense(imu, map1, Rx, Ry, 0);
+    metrics = compute_metrics(im_sense, ref_sense, max_val_sense);
+
+    fieldName = sprintf('Rx%d_Ry%d', Rx, Ry);
+    sense_unreg.(fieldName).image = im_sense;
+    sense_unreg.(fieldName).metrics = metrics;
+
+    show_image_and_error(im_sense, ref_sense, max_val_sense, ...
+        sprintf('Part 2.3: SENSE Rx=%d, Ry=%d, lambda=0', Rx, Ry), ...
+        fullfile(figDir, sprintf('part2_3_sense_Rx%d_Ry%d_lambda0.png', Rx, Ry)));
+
+    print_metrics(sprintf('Part 2.3 SENSE Rx=%d Ry=%d lambda=0', Rx, Ry), metrics);
+end
+\end{lstlisting}
+
+\subsection*{2.4 Regularized SENSE}
+The regularized reconstruction solves
+\[
+\hat m = (C^H C + \lambda I)^{-1} C^H m_u.
+\]
+Increasing $\lambda$ improves conditioning and suppresses artifact/noise amplification, but too much regularization introduces bias and can blur or suppress true image detail. I searched over $\lambda \in \{0,10^{-8},\ldots,10^4\}$ and printed all PSNR/SSIM values in a table. To make the choice automatic, I used a combined score computed as the average of min-max normalized PSNR and min-max normalized SSIM values across the tested $\lambda$ values. The selected $\lambda$ is the row with the highest combined score.
+
+\textbf{MATLAB output:} The code printed the full lambda table for each acceleration case and chose the row with the highest combined score. The selected value was $\lambda=1$ for all three acceleration cases. For $R_x=1,R_y=4$, $\lambda=10$ gave a slightly higher SSIM than $\lambda=1$, but it also reduced PSNR, so the combined PSNR/SSIM score still selected $\lambda=1$.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{c c c c}
+\hline
+$R_x$ & $R_y$ & selected $\lambda$ & PSNR / SSIM \\
+\hline
+1 & 2 & 1 & 35.5545 dB / 0.957431 \\
+1 & 4 & 1 & 25.5280 dB / 0.771031 \\
+2 & 2 & 1 & 31.1732 dB / 0.903190 \\
+\hline
+\end{tabular}
+\caption{Selected regularization weights for SENSE using the combined PSNR/SSIM score.}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part2_4_sense_Rx1_Ry2_selected.png}
+\caption{Regularized SENSE for $R_x=1$, $R_y=2$.}
+\end{figure}
+\textbf{MATLAB output:} $\lambda=1$, PSNR = 35.5545 dB, SSIM = 0.957431.
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part2_4_sense_Rx1_Ry4_selected.png}
+\caption{Regularized SENSE for $R_x=1$, $R_y=4$.}
+\end{figure}
+\textbf{MATLAB output:} $\lambda=1$, PSNR = 25.5280 dB, SSIM = 0.771031.
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part2_4_sense_Rx2_Ry2_selected.png}
+\caption{Regularized SENSE for $R_x=2$, $R_y=2$.}
+\end{figure}
+\textbf{MATLAB output:} $\lambda=1$, PSNR = 31.1732 dB, SSIM = 0.903190.
+
+\paragraph{Code}
+\begin{lstlisting}[style=matlabstyle]
+lambda_candidates = [0, 10.^(-8:4)];
+lambda_sense = zeros(1, size(sense_cases, 1));
+sense_reg = struct();
+lambda_scores = struct();
+
+for caseIdx = 1:size(sense_cases, 1)
+    Rx = sense_cases(caseIdx, 1);
+    Ry = sense_cases(caseIdx, 2);
+    [imu, ~] = undersample(im, Rx, Ry);
+
+    candidateImages = cell(numel(lambda_candidates), 1);
+    scoreRows = zeros(numel(lambda_candidates), 4);
+
+    for k = 1:numel(lambda_candidates)
+        lambda = lambda_candidates(k);
+        candidate = l2sense(imu, map1, Rx, Ry, lambda);
+        metrics = compute_metrics(candidate, ref_sense, max_val_sense);
+
+        candidateImages{k} = candidate;
+        scoreRows(k, 1:3) = [lambda, metrics.psnr, metrics.ssim];
+    end
+
+    psnrVals = scoreRows(:, 2);
+    ssimVals = scoreRows(:, 3);
+    psnrScore = (psnrVals - min(psnrVals)) ./ (max(psnrVals) - min(psnrVals) + eps);
+    ssimScore = (ssimVals - min(ssimVals)) ./ (max(ssimVals) - min(ssimVals) + eps);
+    scoreRows(:, 4) = 0.5 * psnrScore + 0.5 * ssimScore;
+
+    [~, bestIdx] = max(scoreRows(:, 4));
+    fieldName = sprintf('Rx%d_Ry%d', Rx, Ry);
+    bestLambda = scoreRows(bestIdx, 1);
+    bestImage = candidateImages{bestIdx};
+    bestMetrics = struct('psnr', scoreRows(bestIdx, 2), 'ssim', scoreRows(bestIdx, 3));
+
+    lambda_sense(caseIdx) = bestLambda;
+    sense_reg.(fieldName).image = bestImage;
+    sense_reg.(fieldName).lambda = bestLambda;
+    sense_reg.(fieldName).metrics = bestMetrics;
+    sense_reg.(fieldName).scores = scoreRows;
+    lambda_scores.(fieldName) = array2table(scoreRows, ...
+        'VariableNames', {'lambda', 'PSNR_dB', 'SSIM', 'combined_score'});
+
+    show_image_and_error(bestImage, ref_sense, max_val_sense, ...
+        sprintf('Part 2.4: regularized SENSE Rx=%d, Ry=%d, lambda=%g', Rx, Ry, bestLambda), ...
+        fullfile(figDir, sprintf('part2_4_sense_Rx%d_Ry%d_selected.png', Rx, Ry)));
+
+    fprintf('\nPart 2.4 lambda search table for Rx=%d Ry=%d:\n', Rx, Ry);
+    disp(lambda_scores.(fieldName));
+    fprintf('Part 2.4 selection criterion: highest combined_score.\n');
+    fprintf('Part 2.4 Rx=%d Ry=%d selected lambda = %g\n', Rx, Ry, bestLambda);
+    print_metrics(sprintf('Part 2.4 SENSE Rx=%d Ry=%d', Rx, Ry), bestMetrics);
+end
+\end{lstlisting}
+
+\subsection*{2.5 Sensitivity to Coil Map Errors}
+Repeating SENSE with \texttt{map2} uses the same automatically selected regularization weights as Part 2.4. Since SENSE relies directly on the encoding matrix formed by the sensitivity maps, inaccurate maps lead to residual aliasing and spatially structured errors. The map2 results are worse than the corresponding map1 results in all three cases, confirming the sensitivity of SENSE to coil-map accuracy.
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part2_5_sense_map2_Rx1_Ry2.png}
+\caption{Regularized SENSE with map2 for $R_x=1$, $R_y=2$.}
+\end{figure}
+\textbf{MATLAB output:} PSNR = 29.4891 dB, SSIM = 0.919559.
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part2_5_sense_map2_Rx1_Ry4.png}
+\caption{Regularized SENSE with map2 for $R_x=1$, $R_y=4$.}
+\end{figure}
+\textbf{MATLAB output:} PSNR = 19.0632 dB, SSIM = 0.700300.
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part2_5_sense_map2_Rx2_Ry2.png}
+\caption{Regularized SENSE with map2 for $R_x=2$, $R_y=2$.}
+\end{figure}
+\textbf{MATLAB output:} PSNR = 26.0102 dB, SSIM = 0.852694.
+
+\paragraph{Code}
+\begin{lstlisting}[style=matlabstyle]
+sense_map2 = struct();
+for caseIdx = 1:size(sense_cases, 1)
+    Rx = sense_cases(caseIdx, 1);
+    Ry = sense_cases(caseIdx, 2);
+    lambda = lambda_sense(caseIdx);
+    [imu, ~] = undersample(im, Rx, Ry);
+
+    im_sense = l2sense(imu, map2, Rx, Ry, lambda);
+    metrics = compute_metrics(im_sense, ref_sense, max_val_sense);
+
+    fieldName = sprintf('Rx%d_Ry%d', Rx, Ry);
+    sense_map2.(fieldName).image = im_sense;
+    sense_map2.(fieldName).metrics = metrics;
+
+    show_image_and_error(im_sense, ref_sense, max_val_sense, ...
+        sprintf('Part 2.5: SENSE with map2 Rx=%d, Ry=%d, lambda=%g', Rx, Ry, lambda), ...
+        fullfile(figDir, sprintf('part2_5_sense_map2_Rx%d_Ry%d.png', Rx, Ry)));
+
+    print_metrics(sprintf('Part 2.5 SENSE map2 Rx=%d Ry=%d', Rx, Ry), metrics);
+end
+\end{lstlisting}
+
+\subsection*{2.6 g-Factor Derivation}
+For l2-regularized SENSE,
+\[
+A = (C^H C + \lambda I)^{-1}C^H.
+\]
+With $\Psi=I$,
+\[
+\mathrm{Cov}(\hat m)=AA^H
+= (C^H C+\lambda I)^{-1} C^H C
+\left((C^H C+\lambda I)^{-1}\right)^H.
+\]
+Let $G=C^H C$ and $B=(G+\lambda I)^{-1}$. Then
+\[
+\mathrm{Cov}(\hat m)=BGB^H.
+\]
+Using the same definition as the unregularized case, the regularized g-factor for source voxel $i$ is
+\[
+g_i = \sqrt{\operatorname{Re}\left(G_{ii}\,[BGB^H]_{ii}\right)}.
+\]
+
+\subsection*{2.7 g-Factor Maps}
+The g-factor maps show where the SENSE encoding is poorly conditioned. Values near 1 indicate favorable conditioning, while larger values indicate stronger noise amplification. With the selected regularization values, the g-factor is kept bounded in most of the object. I also report the maximum and mean g-factor values inside the object mask, because these summarize the worst-case and average conditioning behavior. Higher acceleration generally produces larger and more spatially variable g-factors because more source voxels must be separated from the same coil measurements.
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.5\linewidth]{figures/part2_7_gfactor_Rx1_Ry2.png}
+\caption{g-factor map for $R_x=1$, $R_y=2$.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.5\linewidth]{figures/part2_7_gfactor_Rx1_Ry4.png}
+\caption{g-factor map for $R_x=1$, $R_y=4$.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.5\linewidth]{figures/part2_7_gfactor_Rx2_Ry2.png}
+\caption{g-factor map for $R_x=2$, $R_y=2$.}
+\end{figure}
+
+\textbf{MATLAB output:} With the selected $\lambda=1$ values, the printed g-factor statistics were:
+\begin{table}[H]
+\centering
+\begin{tabular}{c c c c}
+\hline
+$R_x$ & $R_y$ & maximum g-factor & mean g-factor \\
+\hline
+1 & 2 & 1.4491 & 1.1301 \\
+1 & 4 & 3.0937 & 2.0126 \\
+2 & 2 & 1.7196 & 1.2826 \\
+\hline
+\end{tabular}
+\caption{g-factor statistics for regularized SENSE using the selected $\lambda$ values.}
+\end{table}
+
+\paragraph{Code}
+\begin{lstlisting}[style=matlabstyle]
+g_selected = struct();
+g_selected_stats = struct();
+for caseIdx = 1:size(sense_cases, 1)
+    Rx = sense_cases(caseIdx, 1);
+    Ry = sense_cases(caseIdx, 2);
+    lambda = lambda_sense(caseIdx);
+
+    g = gfactor(map1, Rx, Ry, lambda);
+    fieldName = sprintf('Rx%d_Ry%d', Rx, Ry);
+    g_selected.(fieldName) = g;
+    g_selected_stats.(fieldName) = gfactor_stats(g, map1);
+
+    show_single_image(g, [0 5], ...
+        sprintf('Part 2.7: g-factor Rx=%d, Ry=%d, lambda=%g', Rx, Ry, lambda), ...
+        fullfile(figDir, sprintf('part2_7_gfactor_Rx%d_Ry%d.png', Rx, Ry)));
+
+    fprintf('Part 2.7 g-factor Rx=%d Ry=%d lambda=%g: max = %.4f, mean = %.4f\n', ...
+        Rx, Ry, lambda, g_selected_stats.(fieldName).max, g_selected_stats.(fieldName).mean);
+end
+\end{lstlisting}
+
+\subsection*{2.8 Insufficient Regularization}
+When the selected $\lambda$ values are multiplied by $10^{-6}$, the reconstruction approaches the unregularized case. The g-factor maps therefore show higher peaks and stronger spatial variation, especially in regions where the coil sensitivities do not separate aliased voxels well. This is most important for the more challenging high-acceleration case.
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.5\linewidth]{figures/part2_8_gfactor_Rx1_Ry2.png}
+\caption{g-factor map with insufficient regularization for $R_x=1$, $R_y=2$.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.5\linewidth]{figures/part2_8_gfactor_Rx1_Ry4.png}
+\caption{g-factor map with insufficient regularization for $R_x=1$, $R_y=4$.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.5\linewidth]{figures/part2_8_gfactor_Rx2_Ry2.png}
+\caption{g-factor map with insufficient regularization for $R_x=2$, $R_y=2$.}
+\end{figure}
+
+\textbf{MATLAB output:} After multiplying the selected $\lambda$ values by $10^{-6}$, the printed g-factor statistics were:
+\begin{table}[H]
+\centering
+\begin{tabular}{c c c c}
+\hline
+$R_x$ & $R_y$ & maximum g-factor & mean g-factor \\
+\hline
+1 & 2 & 1.5605 & 1.1824 \\
+1 & 4 & 31.4601 & 5.8143 \\
+2 & 2 & 2.4122 & 1.4204 \\
+\hline
+\end{tabular}
+\caption{g-factor statistics when the selected regularization weights are reduced by $10^{-6}$.}
+\end{table}
+
+\paragraph{Code}
+\begin{lstlisting}[style=matlabstyle]
+g_insufficient = struct();
+g_insufficient_stats = struct();
+for caseIdx = 1:size(sense_cases, 1)
+    Rx = sense_cases(caseIdx, 1);
+    Ry = sense_cases(caseIdx, 2);
+    lambda = lambda_sense(caseIdx) * 1e-6;
+
+    g = gfactor(map1, Rx, Ry, lambda);
+    fieldName = sprintf('Rx%d_Ry%d', Rx, Ry);
+    g_insufficient.(fieldName) = g;
+    g_insufficient_stats.(fieldName) = gfactor_stats(g, map1);
+
+    show_single_image(g, [0 5], ...
+        sprintf('Part 2.8: g-factor Rx=%d, Ry=%d, lambda=%g', Rx, Ry, lambda), ...
+        fullfile(figDir, sprintf('part2_8_gfactor_Rx%d_Ry%d.png', Rx, Ry)));
+
+    fprintf('Part 2.8 g-factor Rx=%d Ry=%d lambda=%g: max = %.4f, mean = %.4f\n', ...
+        Rx, Ry, lambda, g_insufficient_stats.(fieldName).max, g_insufficient_stats.(fieldName).mean);
+end
+\end{lstlisting}
+
+\section*{Part III -- GRAPPA}
+
+For GRAPPA, the fully sampled SoS image after 95th percentile normalization is used as the reference. The MATLAB setup printed \texttt{max\_val} = 2.08358 for this Part III reference.
+
+\subsection*{3.1 Calibration Images}
+The calibration region keeps only the central part of k-space. Small calibration regions produce very smooth and blurry images because only low spatial frequencies are retained. The corresponding k-space figures confirm that only the central square is preserved. As the calibration size increases from $8\times8$ to $32\times32$, more anatomical detail appears. These low-frequency calibration images also contain smooth coil sensitivity variation, which is the information GRAPPA uses for autocalibration.
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part3_1_imc_8x8.png}
+\caption{Calibration images using an $8\times8$ central k-space region.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part3_1_Mc_8x8.png}
+\caption{Calibration k-space spectra using an $8\times8$ central region.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part3_1_imc_16x16.png}
+\caption{Calibration images using a $16\times16$ central k-space region.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part3_1_Mc_16x16.png}
+\caption{Calibration k-space spectra using a $16\times16$ central region.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part3_1_imc_32x32.png}
+\caption{Calibration images using a $32\times32$ central k-space region.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part3_1_Mc_32x32.png}
+\caption{Calibration k-space spectra using a $32\times32$ central region.}
+\end{figure}
+
+\paragraph{Code}
+\begin{lstlisting}[style=matlabstyle]
+calib_cases = [8 8; 16 16; 32 32];
+calib_data = struct();
+
+for caseIdx = 1:size(calib_cases, 1)
+    calibx = calib_cases(caseIdx, 1);
+    caliby = calib_cases(caseIdx, 2);
+    [imc, Mc] = imcalib(im, calibx, caliby);
+
+    fieldName = sprintf('calib%d_%d', calibx, caliby);
+    calib_data.(fieldName).imc = imc;
+    calib_data.(fieldName).Mc = Mc;
+
+    show_montage(abs(imc), [], sprintf('Part 3.1: calibration images %dx%d', calibx, caliby), ...
+        fullfile(figDir, sprintf('part3_1_imc_%dx%d.png', calibx, caliby)));
+    show_montage(kspace_spectrum(Mc), [], sprintf('Part 3.1: calibration k-space %dx%d', calibx, caliby), ...
+        fullfile(figDir, sprintf('part3_1_Mc_%dx%d.png', calibx, caliby)));
+end
+\end{lstlisting}
+
+\subsection*{3.2 Undersampled Images with Calibration Region}
+The central calibration region improves low-frequency consistency because the middle of k-space is fully sampled. The outer k-space still follows the accelerated sampling pattern, so aliasing and resolution loss remain visible. Increasing the acceleration rate removes more outer k-space samples and makes the aliasing stronger.
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part3_2_images_Rx1_Ry2.png}
+\caption{Undersampled images with $32\times32$ calibration region for $R_x=1$, $R_y=2$.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part3_2_kspace_Rx1_Ry2.png}
+\caption{Undersampled k-space with $32\times32$ calibration region for $R_x=1$, $R_y=2$.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part3_2_images_Rx1_Ry4.png}
+\caption{Undersampled images with $32\times32$ calibration region for $R_x=1$, $R_y=4$.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part3_2_kspace_Rx1_Ry4.png}
+\caption{Undersampled k-space with $32\times32$ calibration region for $R_x=1$, $R_y=4$.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part3_2_images_Rx2_Ry2.png}
+\caption{Undersampled images with $32\times32$ calibration region for $R_x=2$, $R_y=2$.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part3_2_kspace_Rx2_Ry2.png}
+\caption{Undersampled k-space with $32\times32$ calibration region for $R_x=2$, $R_y=2$.}
+\end{figure}
+
+\paragraph{Code}
+\begin{lstlisting}[style=matlabstyle]
+calibx = 32;
+caliby = 32;
+undersampled_calib_tests = struct();
+
+for caseIdx = 1:size(sense_cases, 1)
+    Rx = sense_cases(caseIdx, 1);
+    Ry = sense_cases(caseIdx, 2);
+    [imu, Mu] = undersamplecalib(im, Rx, Ry, calibx, caliby);
+
+    fieldName = sprintf('Rx%d_Ry%d', Rx, Ry);
+    undersampled_calib_tests.(fieldName).imu = imu;
+    undersampled_calib_tests.(fieldName).Mu = Mu;
+
+    show_montage(abs(imu), [], sprintf('Part 3.2: undersampled+calib images Rx=%d, Ry=%d', Rx, Ry), ...
+        fullfile(figDir, sprintf('part3_2_images_Rx%d_Ry%d.png', Rx, Ry)));
+    show_montage(kspace_spectrum(Mu), [], sprintf('Part 3.2: undersampled+calib k-space Rx=%d, Ry=%d', Rx, Ry), ...
+        fullfile(figDir, sprintf('part3_2_kspace_Rx%d_Ry%d.png', Rx, Ry)));
+end
+\end{lstlisting}
+
+\subsection*{3.3 GRAPPA Kernel Weights}
+For $R_x=1,R_y=2$, every other $k_y$ line is missing outside the ACS region. The GRAPPA kernel uses three neighboring readout positions from each of the two adjacent acquired $k_y$ lines, giving six spatial source positions per coil. For $N_c=8$, the source vector length is $6N_c=48$. For Nc = 8, the GRAPPA kernel matrix has size $48\times8$. The displayed kernel magnitude and phase show how source samples from different coils contribute to the reconstruction of each output coil.
+
+\textbf{MATLAB output:} GRAPPA kernel size = $48\times8$.
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.55\linewidth]{figures/part3_3_kernel_magnitude_lambda0.png}
+\caption{Magnitude of the GRAPPA kernel for $\lambda=0$.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.55\linewidth]{figures/part3_3_kernel_phase_lambda0.png}
+\caption{Phase of the GRAPPA kernel for $\lambda=0$.}
+\end{figure}
+
+\paragraph{Code}
+\begin{lstlisting}[style=matlabstyle]
+[~, Mc32] = imcalib(im, 32, 32);
+kernel0 = grappa_calibrate(Mc32, 0);
+fprintf('Part 3.3: GRAPPA kernel size = %d x %d\n', size(kernel0, 1), size(kernel0, 2));
+
+show_matrix_image(abs(kernel0), [], 'Part 3.3: GRAPPA kernel magnitude, lambda=0', ...
+    fullfile(figDir, 'part3_3_kernel_magnitude_lambda0.png'));
+show_matrix_image(angle(kernel0), [-pi pi], 'Part 3.3: GRAPPA kernel phase, lambda=0', ...
+    fullfile(figDir, 'part3_3_kernel_phase_lambda0.png'));
+\end{lstlisting}
+
+\subsection*{3.4 GRAPPA Reconstruction with $\lambda=0$}
+After GRAPPA fills the missing k-space samples, each coil image is reconstructed by inverse centered FFT and combined using SoS. The reconstructed k-space spectra show that the missing outer k-space lines are filled using the calibrated kernel while originally acquired and ACS samples are preserved. GRAPPA substantially reduces the aliasing seen in simple undersampling, although residual errors can remain near edges and high-frequency structures because kernel interpolation is approximate.
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part3_4_grappa_coil_images_lambda0.png}
+\caption{GRAPPA reconstructed coil images for $\lambda=0$.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part3_4_grappa_kspace_lambda0.png}
+\caption{GRAPPA reconstructed k-space spectra for $\lambda=0$.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part3_4_grappa_sos_lambda0.png}
+\caption{GRAPPA SoS reconstruction and error for $\lambda=0$.}
+\end{figure}
+
+\textbf{MATLAB output:} $\lambda=0$, PSNR = 35.4791 dB, SSIM = 0.916586.
+
+\paragraph{Code}
+\begin{lstlisting}[style=matlabstyle]
+[~, Mc32] = imcalib(im, 32, 32);
+[~, Mu_grappa] = undersamplecalib(im, 1, 2, 32, 32);
+[imr0, Mr0] = grappa(Mu_grappa, Mc32, 0);
+
+show_montage(abs(imr0), [], 'Part 3.4: GRAPPA coil images, lambda=0', ...
+    fullfile(figDir, 'part3_4_grappa_coil_images_lambda0.png'));
+show_montage(kspace_spectrum(Mr0), [], 'Part 3.4: GRAPPA reconstructed k-space, lambda=0', ...
+    fullfile(figDir, 'part3_4_grappa_kspace_lambda0.png'));
+
+grappa_sos0 = normalize95(sos_combine(imr0));
+metrics_34 = compute_metrics(grappa_sos0, ref_grappa, max_val_grappa);
+
+show_image_and_error(grappa_sos0, ref_grappa, max_val_grappa, ...
+    'Part 3.4: GRAPPA SoS, lambda=0', ...
+    fullfile(figDir, 'part3_4_grappa_sos_lambda0.png'));
+
+print_metrics('Part 3.4 GRAPPA lambda=0', metrics_34);
+\end{lstlisting}
+
+\subsection*{3.5 GRAPPA Reconstruction with Regularization}
+Regularization is applied during kernel calibration by solving a ridge-regression problem for the GRAPPA weights. Initially, when I searched only a narrower range of $\lambda$ values, nearly all tested values gave identical PSNR and SSIM, which made the regularization behavior suspicious. Therefore, I expanded the search to $\lambda \in \{0,10^{-8},\ldots,10^{15}\}$. The combined score was computed as the average of min-max normalized PSNR and min-max normalized SSIM values across the tested lambda values. Small and moderate $\lambda$ values remain almost identical, but very large $\lambda$ values eventually change the kernel enough to affect the reconstruction. The best combined score was obtained at $\lambda=10^{11}$, which gives a small improvement over $\lambda=0$. Since the improvement is modest, I do not interpret this as a major regularization benefit; it mainly shows that this data set is not very sensitive to regularization until extremely large $\lambda$ values are used.
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part3_5_grappa_kspace_selected.png}
+\caption{GRAPPA reconstructed k-space spectra using the selected regularization weight.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybegraphics[width=0.92\linewidth]{figures/part3_5_grappa_sos_selected.png}
+\caption{GRAPPA SoS reconstruction and error using the selected regularization weight.}
+\end{figure}
+
+\textbf{MATLAB output:} selected $\lambda=10^{11}$, PSNR = 35.6017 dB, SSIM = 0.921049. The MATLAB code searches $\lambda \in \{0,10^{-8},\ldots,10^{15}\}$ and prints the full lambda table.
+
+\paragraph{Code}
+\begin{lstlisting}[style=matlabstyle]
+lambda_candidates_grappa = [0, 10.^(-8:15)];
+[~, Mc32] = imcalib(im, 32, 32);
+[~, Mu_grappa] = undersamplecalib(im, 1, 2, 32, 32);
+
+candidateImages = cell(numel(lambda_candidates_grappa), 1);
+candidateKspace = cell(numel(lambda_candidates_grappa), 1);
+grappa_scores = zeros(numel(lambda_candidates_grappa), 4);
+
+for k = 1:numel(lambda_candidates_grappa)
+    lambda = lambda_candidates_grappa(k);
+    [imr, Mr] = grappa(Mu_grappa, Mc32, lambda);
+    grappa_sos = normalize95(sos_combine(imr));
+    metrics = compute_metrics(grappa_sos, ref_grappa, max_val_grappa);
+
+    candidateImages{k} = grappa_sos;
+    candidateKspace{k} = Mr;
+    grappa_scores(k, 1:3) = [lambda, metrics.psnr, metrics.ssim];
+end
+
+psnrVals = grappa_scores(:, 2);
+ssimVals = grappa_scores(:, 3);
+if max(psnrVals) - min(psnrVals) < 1e-3
+    psnrScore = zeros(size(psnrVals));
+else
+    psnrScore = (psnrVals - min(psnrVals)) ./ (max(psnrVals) - min(psnrVals));
+end
+if max(ssimVals) - min(ssimVals) < 1e-4
+    ssimScore = zeros(size(ssimVals));
+else
+    ssimScore = (ssimVals - min(ssimVals)) ./ (max(ssimVals) - min(ssimVals));
+end
+grappa_scores(:, 4) = 0.5 * psnrScore + 0.5 * ssimScore;
+
+[~, bestIdx] = max(grappa_scores(:, 4));
+bestLambda = grappa_scores(bestIdx, 1);
+bestImage = candidateImages{bestIdx};
+bestKspace = candidateKspace{bestIdx};
+bestMetrics = struct('psnr', grappa_scores(bestIdx, 2), 'ssim', grappa_scores(bestIdx, 3));
+lambda_grappa_selected = bestLambda;
+grappa_score_table = array2table(grappa_scores, ...
+    'VariableNames', {'lambda', 'PSNR_dB', 'SSIM', 'combined_score'});
+
+show_montage(kspace_spectrum(bestKspace), [], ...
+    sprintf('Part 3.5: GRAPPA reconstructed k-space, lambda=%g', bestLambda), ...
+    fullfile(figDir, 'part3_5_grappa_kspace_selected.png'));
+show_image_and_error(bestImage, ref_grappa, max_val_grappa, ...
+    sprintf('Part 3.5: GRAPPA SoS, lambda=%g', bestLambda), ...
+    fullfile(figDir, 'part3_5_grappa_sos_selected.png'));
+
+fprintf('\nPart 3.5 lambda search table for GRAPPA:\n');
+disp(grappa_score_table);
+fprintf('Part 3.5 selected lambda = %g\n', bestLambda);
+print_metrics('Part 3.5 GRAPPA selected lambda', bestMetrics);
+\end{lstlisting}
+
+\subsection*{3.6 Final Remarks}
+At the matching acceleration factor $R_x=1,R_y=2$, both SENSE and GRAPPA produce high-quality reconstructions. With accurate \texttt{map1} sensitivities, regularized SENSE gives PSNR = 35.5545 dB and SSIM = 0.957431. Regularized GRAPPA gives PSNR = 35.6017 dB and SSIM = 0.921049. Thus, the two methods have very similar PSNR in this case, while SENSE gives the higher SSIM. GRAPPA also performs well and has the advantage that it is autocalibrated and does not require explicit coil sensitivity maps. The comparison shows that SENSE can perform very well when coil maps are accurate and the encoding is well-conditioned, while GRAPPA is useful when explicit sensitivity estimation is difficult or unreliable. Performance depends on acceleration rate, ACS size, coil geometry, regularization, and implementation details.
+
+\appendix
+\section*{Shared MATLAB Helper Functions}
+The main helper functions used by the cells are listed below for completeness.
+\begin{lstlisting}[style=matlabstyle]
+function y = fft2c(x)
+    y = fftshift(fftshift(fft2(ifftshift(ifftshift(x, 1), 2)), 1), 2);
+end
+
+function y = ifft2c(x)
+    y = fftshift(fftshift(ifft2(ifftshift(ifftshift(x, 1), 2)), 1), 2);
+end
+
+function s = kspace_spectrum(M)
+    s = log(1 + abs(M));
+end
+
+function out = normalize95(x)
+    out = abs(x);
+    out(~isfinite(out)) = 0;
+    p = prctile(out(:), 95);
+    if p > 0
+        out = out ./ p;
+    end
+    out(~isfinite(out)) = 0;
+end
+
+function out = olc_recon(im, map)
+    numerator = sum(conj(map) .* im, 3);
+    denominator = sum(abs(map).^2, 3);
+    out = numerator ./ denominator;
+    out(~isfinite(out)) = 0;
+end
+
+function out = sos_combine(im)
+    out = sqrt(sum(abs(im).^2, 3));
+    out(~isfinite(out)) = 0;
+end
+
+function [imu, Mu] = undersample(im, Rx, Ry)
+    [Nx, Ny, ~] = size(im);
+    M = fft2c(im);
+    xidx = centered_sampling_indices(Nx, Rx);
+    yidx = centered_sampling_indices(Ny, Ry);
+    Mu = M(xidx, yidx, :);
+    imu = ifft2c(Mu);
+    imu(~isfinite(imu)) = 0;
+end
+
+function [imc, Mc] = imcalib(im, calibx, caliby)
+    [Nx, Ny, Nc] = size(im);
+    M = fft2c(im);
+    mask = false(Nx, Ny);
+    xidx = center_indices(Nx, calibx);
+    yidx = center_indices(Ny, caliby);
+    mask(xidx, yidx) = true;
+    Mc = M .* repmat(mask, [1 1 Nc]);
+    imc = ifft2c(Mc);
+    imc(~isfinite(imc)) = 0;
+end
+
+function [imu, Mu] = undersamplecalib(im, Rx, Ry, calibx, caliby)
+    [Nx, Ny, Nc] = size(im);
+    M = fft2c(im);
+    mask = false(Nx, Ny);
+    xSample = centered_sampling_indices(Nx, Rx);
+    ySample = centered_sampling_indices(Ny, Ry);
+    mask(xSample, ySample) = true;
+    xidx = center_indices(Nx, calibx);
+    yidx = center_indices(Ny, caliby);
+    mask(xidx, yidx) = true;
+    Mu = M .* repmat(mask, [1 1 Nc]);
+    imu = ifft2c(Mu);
+    imu(~isfinite(imu)) = 0;
+end
+
+function im_sense = l2sense(imu, map, Rx, Ry, lambda)
+    [Nx, Ny, Nc] = size(map);
+    Nxu = size(imu, 1);
+    Nyu = size(imu, 2);
+    if Nxu ~= Nx / Rx || Nyu ~= Ny / Ry
+        error('The aliased image size is inconsistent with Rx and Ry.');
+    end
+    im_sense_complex = zeros(Nx, Ny);
+
+    for ax = 1:Nxu
+        srcx = alias_source_indices(ax, Nx, Rx);
+        for ay = 1:Nyu
+            srcy = alias_source_indices(ay, Ny, Ry);
+            [XX, YY] = ndgrid(srcx, srcy);
+            lin = sub2ind([Nx Ny], XX(:), YY(:));
+            nsrc = numel(lin);
+            if nsrc ~= Rx * Ry
+                error('Unexpected number of unfolded source voxels.');
+            end
+
+            C = zeros(Nc, nsrc);
+            for coil = 1:Nc
+                tmp = map(:, :, coil);
+                C(coil, :) = tmp(lin).';
+            end
+
+            y = squeeze(imu(ax, ay, :));
+            y(~isfinite(y)) = 0;
+            if norm(C, 'fro') == 0 || ~any(y)
+                im_sense_complex(lin) = 0;
+                continue;
+            end
+
+            G = C' * C;
+            rhs = C' * y;
+            if lambda == 0
+                xhat = pinv(G) * rhs;
+            else
+                xhat = (G + lambda * eye(nsrc)) \ rhs;
+            end
+            im_sense_complex(lin) = xhat;
+        end
+    end
+
+    im_sense = normalize95(abs(im_sense_complex));
+end
+
+function g = gfactor(map, Rx, Ry, lambda)
+    [Nx, Ny, Nc] = size(map);
+    Nxu = Nx / Rx;
+    Nyu = Ny / Ry;
+    g = zeros(Nx, Ny);
+
+    for ax = 1:Nxu
+        srcx = alias_source_indices(ax, Nx, Rx);
+        for ay = 1:Nyu
+            srcy = alias_source_indices(ay, Ny, Ry);
+            [XX, YY] = ndgrid(srcx, srcy);
+            lin = sub2ind([Nx Ny], XX(:), YY(:));
+            nsrc = numel(lin);
+            if nsrc ~= Rx * Ry
+                error('Unexpected number of unfolded source voxels.');
+            end
+
+            C = zeros(Nc, nsrc);
+            for coil = 1:Nc
+                tmp = map(:, :, coil);
+                C(coil, :) = tmp(lin).';
+            end
+
+            G = C' * C;
+            B = pinv(G + lambda * eye(nsrc));
+            covSense = B * G * B';
+
+            for s = 1:nsrc
+                sensPower = real(G(s, s));
+                if sensPower <= 0
+                    g(lin(s)) = 0;
+                else
+                    gArg = real(sensPower * covSense(s, s));
+                    if gArg < 0 && abs(gArg) < 1e-10
+                        gArg = 0;
+                    end
+                    gval = sqrt(max(gArg, 0));
+                    if isfinite(gval)
+                        g(lin(s)) = gval;
+                    end
+                end
+            end
+        end
+    end
+
+    allZero = sum(abs(map).^2, 3) == 0;
+    g(allZero) = 0;
+end
+
+function stats = gfactor_stats(g, map)
+    objectMask = sum(abs(map).^2, 3) > 0;
+    vals = g(objectMask);
+    vals = vals(isfinite(vals));
+    if isempty(vals)
+        stats.max = 0;
+        stats.mean = 0;
+    else
+        stats.max = max(vals(:));
+        stats.mean = mean(vals(:));
+    end
+end
+
+function kernel = grappa_calibrate(Mc, lambda)
+    [Nx, Ny, Nc] = size(Mc);
+    mask = any(abs(Mc) > 0, 3);
+    rows = find(any(mask, 2));
+    cols = find(any(mask, 1));
+
+    if isempty(rows) || isempty(cols)
+        error('Calibration data are empty.');
+    end
+
+    xRange = rows(1):rows(end);
+    yRange = cols(1):cols(end);
+    xTargets = xRange(2:end-1);
+    yTargets = yRange(2:end-1);
+    acquiredY = centered_sampling_indices(Ny, 2);
+    yTargets = yTargets(~ismember(yTargets, acquiredY));
+
+    nExamples = numel(xTargets) * numel(yTargets);
+    source = zeros(nExamples, 6 * Nc);
+    target = zeros(nExamples, Nc);
+
+    row = 0;
+    for x = xTargets
+        for y = yTargets
+            row = row + 1;
+            vec = zeros(1, 6 * Nc);
+            for coil = 1:Nc
+                base = (coil - 1) * 6;
+                vec(base + (1:6)) = grappa_source_samples(Mc, x, y, coil);
+            end
+            source(row, :) = vec;
+            target(row, :) = reshape(Mc(x, y, :), 1, Nc);
+        end
+    end
+
+    kernel = (source' * source + lambda * eye(6 * Nc)) \ (source' * target);
+end
+
+function [imr, Mr] = grappa(Mu, Mc, lambda)
+    [Nx, Ny, Nc] = size(Mu);
+    kernel = grappa_calibrate(Mc, lambda);
+    Mr = Mu;
+
+    calibMask = any(abs(Mc) > 0, 3);
+    rows = find(any(calibMask, 2));
+    cols = find(any(calibMask, 1));
+
+    acquiredMask = false(Nx, Ny);
+    acquiredMask(:, centered_sampling_indices(Ny, 2)) = true;
+    acquiredMask(rows(1):rows(end), cols(1):cols(end)) = true;
+
+    for x = 2:Nx-1
+        for y = 2:Ny-1
+            if ~acquiredMask(x, y)
+                vec = zeros(1, 6 * Nc);
+                for coil = 1:Nc
+                    base = (coil - 1) * 6;
+                    vec(base + (1:6)) = grappa_source_samples(Mr, x, y, coil);
+                end
+                Mr(x, y, :) = reshape(vec * kernel, 1, 1, Nc);
+            end
+        end
+    end
+
+    imr = ifft2c(Mr);
+    imr(~isfinite(imr)) = 0;
+end
+
+function samples = grappa_source_samples(M, x, y, coil)
+    samples = [ ...
+        M(x-1, y-1, coil), M(x, y-1, coil), M(x+1, y-1, coil), ...
+        M(x-1, y+1, coil), M(x, y+1, coil), M(x+1, y+1, coil)];
+end
+
+function idx = center_indices(N, width)
+    first = floor(N / 2) - floor(width / 2) + 1;
+    idx = first:(first + width - 1);
+end
+
+function idx = centered_sampling_indices(N, R)
+    if mod(N, R) ~= 0
+        error('Image size must be divisible by the acceleration factor.');
+    end
+    center = floor(N / 2) + 1;
+    idx = find(mod((1:N) - center, R) == 0);
+    if numel(idx) ~= N / R
+        error('Unexpected number of retained k-space samples.');
+    end
+end
+
+function idx = alias_source_indices(aliasIndex, N, R)
+    M = N / R;
+    fullCenter = floor(N / 2) + 1;
+    aliasCenter = floor(M / 2) + 1;
+    first = mod(aliasIndex - aliasCenter + fullCenter - 1, M) + 1;
+    idx = first:M:N;
+end
+
+function metrics = compute_metrics(img, ref, maxVal)
+    a = real(img) ./ maxVal;
+    b = real(ref) ./ maxVal;
+    a(~isfinite(a)) = 0;
+    b(~isfinite(b)) = 0;
+
+    err = a - b;
+    mse = mean(err(:).^2);
+    if mse == 0
+        metrics.psnr = Inf;
+    else
+        metrics.psnr = 10 * log10(1 / mse);
+    end
+
+    try
+        metrics.ssim = ssim(a, b, 'DynamicRange', 1);
+    catch
+        try
+            metrics.ssim = ssim(a, b);
+        catch
+            metrics.ssim = NaN;
+            warning('SSIM could not be computed. Check that the Image Processing Toolbox is available.');
+        end
+    end
+end
+
+function print_metrics(label, metrics)
+    fprintf('%s: PSNR = %.4f dB, SSIM = %.6f\n', label, metrics.psnr, metrics.ssim);
+end
+
+function show_montage(stack, displayRange, figTitle, outPath)
+    figure('Color', 'w');
+    if isempty(displayRange)
+        hi = prctile(abs(stack(:)), 99);
+        if hi <= 0 || ~isfinite(hi)
+            hi = 1;
+        end
+        displayRange = [0 hi];
+    end
+    montage(stack, 'DisplayRange', displayRange);
+    colormap gray;
+    title(figTitle, 'Interpreter', 'none');
+    save_current_figure(outPath);
+end
+
+function show_single_image(img, displayRange, figTitle, outPath)
+    figure('Color', 'w');
+    imshow(img, displayRange);
+    colormap gray;
+    colorbar;
+    title(figTitle, 'Interpreter', 'none');
+    save_current_figure(outPath);
+end
+
+function show_image_and_error(img, ref, maxVal, figTitle, outPath)
+    figure('Color', 'w');
+    tiledlayout(1, 2, 'Padding', 'compact', 'TileSpacing', 'compact');
+
+    nexttile;
+    imshow(img, [0 maxVal]);
+    colormap gray;
+    title('Reconstruction', 'Interpreter', 'none');
+    colorbar;
+
+    nexttile;
+    imshow(abs(img - ref), [0 0.2 * maxVal]);
+    colormap gray;
+    title('Absolute error', 'Interpreter', 'none');
+    colorbar;
+
+    sgtitle(figTitle, 'Interpreter', 'none');
+    save_current_figure(outPath);
+end
+
+function show_matrix_image(A, displayRange, figTitle, outPath)
+    figure('Color', 'w');
+    if isempty(displayRange)
+        imagesc(A);
+    else
+        imagesc(A, displayRange);
+    end
+    axis image;
+    colormap gray;
+    colorbar;
+    title(figTitle, 'Interpreter', 'none');
+    xlabel('Output coil');
+    ylabel('Kernel coefficient index');
+    save_current_figure(outPath);
+end
+
+function save_current_figure(outPath)
+    [outDir, ~, ~] = fileparts(outPath);
+    ensure_dir(outDir);
+    try
+        exportgraphics(gcf, outPath, 'Resolution', 200);
+    catch
+        saveas(gcf, outPath);
+    end
+end
+
+function ensure_dir(pathName)
+    if ~exist(pathName, 'dir')
+        mkdir(pathName);
+    end
+end
+\end{lstlisting}
+
+\end{document}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

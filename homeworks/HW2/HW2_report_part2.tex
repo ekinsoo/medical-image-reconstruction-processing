@@ -1,0 +1,330 @@
+
+\section{Part II: Gridding vs Backprojection}
+
+\subsection{Phantom and Sinogram (2.1)}
+Generated a $256\times256$ Modified Shepp-Logan phantom and computed its Radon transform for $0^\circ$--$179^\circ$. The sinogram is $367\times180$ where the $l$-axis shows the projection samples and $\theta$ shows the angle.
+\begin{figure}[H]\centering
+\begin{subfigure}{0.45\textwidth}\includegraphics[width=\textwidth]{results/plots/2_1_phantom.png}\caption{Phantom.}\end{subfigure}\hfill
+\begin{subfigure}{0.50\textwidth}\includegraphics[width=\textwidth]{results/plots/2_1_sinogram.png}\caption{Sinogram.}\end{subfigure}
+\caption{Phantom and sinogram.}\end{figure}
+\begin{figure}[H]\centering
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/2_1_phantom_horiz.png}\caption{Horizontal XS.}\end{subfigure}\hfill
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/2_1_phantom_vert.png}\caption{Vertical XS.}\end{subfigure}
+\caption{2.1 Phantom cross-sections.}\end{figure}
+\begin{lstlisting}[style=matlab]
+P = phantom('Modified Shepp-Logan',256);
+P = normImg(P);
+angles = 0:179;
+proj = radon(P, angles);
+figure; imshow(P,[0 1]); colormap gray; colorbar;
+title('Shepp-Logan Phantom 256x256'); saveas(gcf, fullfile(plotDir,'2_1_phantom.png'));
+figure; imagesc(angles,1:size(proj,1),proj); colormap gray; colorbar;
+xlabel('\theta (degrees)'); ylabel('l'); title('Sinogram'); axis xy;
+saveas(gcf, fullfile(plotDir,'2_1_sinogram.png'));
+figure; plot(P(128,:)); xlabel('Column'); title('2.1 Phantom Horiz XS'); grid on;
+saveas(gcf, fullfile(plotDir,'2_1_phantom_horiz.png'));
+figure; plot(P(:,128)); xlabel('Row'); title('2.1 Phantom Vert XS'); grid on;
+saveas(gcf, fullfile(plotDir,'2_1_phantom_vert.png'));
+\end{lstlisting}
+
+\subsection{Filtered Backprojection (2.2)}
+Used \texttt{iradon} with the default Ram-Lak (ramp) filter. The ramp filter corrects the $1/|f|$ oversampling at low frequencies that occurs in radial sampling. Cropped the result to $256\times256$. \textbf{PSNR=26.82 dB, SSIM=0.6799, CPU=0.08 s.} Good reconstruction with minor streak artifacts from limited projections (180).
+\begin{figure}[H]\centering
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/2_2_image.png}\caption{FBP.}\end{subfigure}\hfill
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/2_2_error.png}\caption{Error.}\end{subfigure}
+\caption{2.2 FBP.}\end{figure}
+\begin{figure}[H]\centering
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/2_2_horiz.png}\caption{Horizontal XS.}\end{subfigure}\hfill
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/2_2_vert.png}\caption{Vertical XS.}\end{subfigure}
+\caption{2.2 Cross-sections.}\end{figure}
+\begin{lstlisting}[style=matlab]
+t0=cputime;
+ima_fbp_raw = iradon(proj, angles);
+t_fbp=cputime-t0;
+csz=round(size(ima_fbp_raw,1)/2);
+ima_fbp=ima_fbp_raw(csz-127:csz+128, csz-127:csz+128);
+ima_fbp=normImg(ima_fbp);
+err_fbp=abs(ima_fbp-P);
+psnr_fbp=psnr(ima_fbp,P); ssim_fbp=ssim(ima_fbp,P);
+figure; imshow(ima_fbp,[0 1]); colormap gray; colorbar;
+title('2.2 FBP Image'); saveas(gcf, fullfile(plotDir,'2_2_image.png'));
+figure; imshow(err_fbp,[0 0.2]); colormap gray; colorbar;
+title('2.2 Error'); saveas(gcf, fullfile(plotDir,'2_2_error.png'));
+figure; plot(ima_fbp(128,:),'b'); hold on; plot(P(128,:),'r--');
+legend('FBP','Ref'); title('2.2 Horiz XS'); grid on; saveas(gcf,fullfile(plotDir,'2_2_horiz.png'));
+figure; plot(ima_fbp(:,128),'b'); hold on; plot(P(:,128),'r--');
+legend('FBP','Ref'); title('2.2 Vert XS'); grid on; saveas(gcf,fullfile(plotDir,'2_2_vert.png'));
+\end{lstlisting}
+
+\subsection{Naive Backprojection (2.3)}
+Used \texttt{iradon} with filter set to \texttt{'none'}. Without the ramp filter, low frequencies dominate completely and the image is severely blurred. \textbf{PSNR=4.72 dB, SSIM=0.1535, CPU=0.08 s.} This shows the ramp filter is essential for backprojection.
+\begin{figure}[H]\centering
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/2_3_image.png}\caption{Naive BP.}\end{subfigure}\hfill
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/2_3_error.png}\caption{Error.}\end{subfigure}
+\caption{2.3 Naive backprojection.}\end{figure}
+\begin{figure}[H]\centering
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/2_3_horiz.png}\caption{Horizontal XS.}\end{subfigure}\hfill
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/2_3_vert.png}\caption{Vertical XS.}\end{subfigure}
+\caption{2.3 Cross-sections.}\end{figure}
+\begin{lstlisting}[style=matlab]
+t0=cputime;
+ima_bp_raw = iradon(proj, angles, 'linear', 'none');
+t_bp=cputime-t0;
+ima_bp=ima_bp_raw(csz-127:csz+128, csz-127:csz+128);
+ima_bp=normImg(ima_bp);
+err_bp=abs(ima_bp-P);
+psnr_bp=psnr(ima_bp,P); ssim_bp=ssim(ima_bp,P);
+figure; imshow(ima_bp,[0 1]); colormap gray; colorbar;
+title('2.3 Naive BP'); saveas(gcf, fullfile(plotDir,'2_3_image.png'));
+figure; imshow(err_bp,[0 0.2]); colormap gray; colorbar;
+title('2.3 Error'); saveas(gcf, fullfile(plotDir,'2_3_error.png'));
+figure; plot(ima_bp(128,:),'b'); hold on; plot(P(128,:),'r--');
+legend('NaiveBP','Ref'); title('2.3 Horiz XS'); grid on; saveas(gcf,fullfile(plotDir,'2_3_horiz.png'));
+figure; plot(ima_bp(:,128),'b'); hold on; plot(P(:,128),'r--');
+legend('NaiveBP','Ref'); title('2.3 Vert XS'); grid on; saveas(gcf,fullfile(plotDir,'2_3_vert.png'));
+\end{lstlisting}
+
+\subsection{K-Space via Projection-Slice Theorem (2.4)}
+The Projection-Slice Theorem says the 1D FT of a projection at angle $\theta$ equals a radial line through 2D k-space at that angle. I set $k_{max}=0.5$ for compatibility with \texttt{gridkb}. The k-space trajectory is: $(k_x,k_y) = k_r(\cos\theta, \sin\theta)$. The log-magnitude plot shows the energy concentrated at the center.
+\begin{figure}[H]\centering
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/2_4_trajectory.png}\caption{Trajectory.}\end{subfigure}\hfill
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/2_4_kspace_mag.png}\caption{K-space (log).}\end{subfigure}
+\caption{2.4 Projection-Slice Theorem.}\end{figure}
+\begin{lstlisting}[style=matlab]
+Np = size(proj,1); kmax = 0.5;
+kr_vec = linspace(-kmax, kmax, Np).';
+kdata_proj = zeros(Np,180);
+for th=1:180
+    kdata_proj(:,th) = fftshift(fft(ifftshift(proj(:,th))));
+end
+theta_rad = deg2rad(angles);
+kx_proj = kr_vec * cos(theta_rad);
+ky_proj = kr_vec * sin(theta_rad);
+ktraj_proj = kx_proj + 1j*ky_proj;
+figure; plot(real(ktraj_proj(:)),imag(ktraj_proj(:)),'b.','MarkerSize',1);
+xlabel('k_x'); ylabel('k_y'); title('2.4 Radial Trajectory'); axis equal; grid on;
+saveas(gcf, fullfile(plotDir,'2_4_trajectory.png'));
+figure; imagesc(angles, kr_vec, log(1+abs(kdata_proj))); colormap gray; colorbar;
+xlabel('\theta'); ylabel('k_r'); title('2.4 K-Space Magnitude (log)'); axis xy;
+saveas(gcf, fullfile(plotDir,'2_4_kspace_mag.png'));
+\end{lstlisting}
+
+\subsection{Geometric DCF (2.5)}
+For radial trajectories, the area associated with each sample is $w(k_r)=|k_r|\cdot\frac{2\pi}{N_\theta}\cdot\Delta k_r$. The DC point gets a small disk area $\pi(\Delta k_r/2)^2/N_\theta$. I cannot use \texttt{voronoidens} here because multiple lines pass through the center, giving duplicate positions.
+\begin{figure}[H]\centering\includegraphics[width=0.5\textwidth]{results/plots/2_5_dcf.png}\caption{2.5 DCF.}\end{figure}
+\begin{lstlisting}[style=matlab]
+dkr = 2*kmax/(Np-1); n_ang = 180;
+area_proj = abs(kr_vec)*(2*pi/n_ang)*dkr;
+[~,idx_dc]=min(abs(kr_vec));
+area_proj(idx_dc) = pi*(dkr/2)^2 / n_ang;
+area_proj2d = repmat(area_proj, 1, n_ang);
+figure; plot(kr_vec, area_proj); xlabel('k_r'); ylabel('Area');
+title('2.5 DCF (first angle)'); grid on; saveas(gcf, fullfile(plotDir,'2_5_dcf.png'));
+\end{lstlisting}
+
+\subsection{Direct Summation - Projection Data (2.6)}
+Same row-by-row direct summation using the k-space data from the Projection-Slice Theorem. Images may be flipped/transposed; I corrected the orientation before comparison. \textbf{PSNR=20.30 dB, SSIM=0.4669, CPU=406.73 s.} Very slow due to large number of samples ($L=66060$).
+\begin{figure}[H]\centering
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/2_6_image.png}\caption{DS.}\end{subfigure}\hfill
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/2_6_error.png}\caption{Error.}\end{subfigure}
+\caption{2.6 Direct summation.}\end{figure}
+\begin{figure}[H]\centering
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/2_6_horiz.png}\caption{Horizontal XS.}\end{subfigure}\hfill
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/2_6_vert.png}\caption{Vertical XS.}\end{subfigure}
+\caption{2.6 Cross-sections.}\end{figure}
+\begin{lstlisting}[style=matlab]
+Np2=256; dxp=1; taup=Np2/2;
+kxp=real(ktraj_proj(:)); kyp=imag(ktraj_proj(:));
+dMp=area_proj2d(:).*kdata_proj(:);
+np=(0:Np2-1)-taup;
+ima_dsp=zeros(Np2,Np2);
+t0=cputime;
+for ix=1:Np2
+    phx=exp(1j*2*pi*dxp*kxp*np(ix));
+    phy=exp(1j*2*pi*dxp*kyp*np);
+    ima_dsp(ix,:)=(dMp.*phx).'*phy;
+    if mod(ix,64)==0, fprintf('  2.6 row %d/%d\n',ix,Np2); end
+end
+t_dsp=cputime-t0; clear phx phy;
+ima_dsp=normImg(ima_dsp.');
+% Auto-orient: try flips/transposes, pick best PSNR vs P
+cands={ima_dsp,flipud(ima_dsp),fliplr(ima_dsp),ima_dsp.',...
+    flipud(fliplr(ima_dsp)),rot90(ima_dsp,1),rot90(ima_dsp,3)};
+bp=-Inf;
+for ci=1:numel(cands)
+    if all(size(cands{ci})==[256 256])
+        pp=psnr(cands{ci},P); if pp>bp, bp=pp; ima_dsp=cands{ci}; end
+    end
+end
+err_dsp=abs(ima_dsp-P);
+psnr_dsp=psnr(ima_dsp,P); ssim_dsp=ssim(ima_dsp,P);
+figure; imshow(ima_dsp,[0 1]); colormap gray; colorbar;
+title('2.6 DS Radial'); saveas(gcf, fullfile(plotDir,'2_6_image.png'));
+figure; imshow(err_dsp,[0 0.2]); colormap gray; colorbar;
+title('2.6 Error'); saveas(gcf, fullfile(plotDir,'2_6_error.png'));
+\end{lstlisting}
+
+\subsection{2X Gridding - Projection Data (2.7)}
+2X gridding with wg=4. To match the phantom orientation, I rotate the gridding output by $90^\circ$ counterclockwise before cropping and comparison. It achieved very similar quality to direct summation while being about 1000 times faster. \textbf{PSNR=20.30 dB, SSIM=0.4667, CPU=0.42 s.} This clearly shows the practical advantage of gridding.
+\begin{figure}[H]\centering
+\begin{subfigure}{0.32\textwidth}\includegraphics[width=\textwidth]{results/plots/2_7_full.png}\caption{Full output.}\end{subfigure}\hfill
+\begin{subfigure}{0.32\textwidth}\includegraphics[width=\textwidth]{results/plots/2_7_crop.png}\caption{Cropped.}\end{subfigure}\hfill
+\begin{subfigure}{0.32\textwidth}\includegraphics[width=\textwidth]{results/plots/2_7_error.png}\caption{Error.}\end{subfigure}
+\caption{2.7 Gridding 2X.}\end{figure}
+\begin{figure}[H]\centering
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/2_7_horiz.png}\caption{Horizontal XS.}\end{subfigure}\hfill
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/2_7_vert.png}\caption{Vertical XS.}\end{subfigure}
+\caption{2.7 Cross-sections.}\end{figure}
+\begin{lstlisting}[style=matlab]
+t0=cputime;
+ima_g2p_full=gridkb(kdata_proj,ktraj_proj,area_proj2d,256,2,4,'image');
+t_g2p=cputime-t0;
+ima_g2p_full=normImg(rot90(ima_g2p_full,1));
+c5=256; h5=128;
+ima_g2p=normImg(ima_g2p_full(c5-h5+1:c5+h5,c5-h5+1:c5+h5));
+err_g2p=abs(ima_g2p-P);
+psnr_g2p=psnr(ima_g2p,P); ssim_g2p=ssim(ima_g2p,P);
+figure; imshow(ima_g2p_full,[0 1]); colormap gray; colorbar;
+title('2.7 Full Output'); saveas(gcf, fullfile(plotDir,'2_7_full.png'));
+figure; imshow(ima_g2p,[0 1]); colormap gray; colorbar;
+title('2.7 Cropped 256x256'); saveas(gcf, fullfile(plotDir,'2_7_crop.png'));
+figure; imshow(err_g2p,[0 0.2]); colormap gray; colorbar;
+title('2.7 Error'); saveas(gcf, fullfile(plotDir,'2_7_error.png'));
+figure; plot(ima_g2p(128,:),'b'); hold on; plot(P(128,:),'r--');
+legend('Grid2X','Ref'); title('2.7 Horiz XS'); grid on; saveas(gcf,fullfile(plotDir,'2_7_horiz.png'));
+figure; plot(ima_g2p(:,128),'b'); hold on; plot(P(:,128),'r--');
+legend('Grid2X','Ref'); title('2.7 Vert XS'); grid on; saveas(gcf,fullfile(plotDir,'2_7_vert.png'));
+\end{lstlisting}
+
+\section{Part III: Gridding for Radial Data}
+
+\subsection{K-Space Trajectory (3.1)}
+Loaded \texttt{shepplogan\_radial\_data.mat} ($129\times300$). Unlike the projection data, these radial lines start at the center and extend outward in one direction only (center-out, one-sided).
+\begin{figure}[H]\centering\includegraphics[width=0.5\textwidth]{results/plots/3_1_trajectory.png}\caption{3.1 One-sided radial trajectory.}\end{figure}
+\begin{lstlisting}[style=matlab]
+load('shepplogan_radial_data.mat');
+figure; plot(real(ktraj(:)),imag(ktraj(:)),'b.','MarkerSize',1);
+xlabel('k_x'); ylabel('k_y'); title('3.1 Radial Trajectory (one-sided)');
+axis equal; grid on; saveas(gcf, fullfile(plotDir,'3_1_trajectory.png'));
+\end{lstlisting}
+
+\subsection{Geometric DCF (3.2)}
+Same geometric formula as 2.5 but with $k_r \in [0, k_{max}]$ instead of $[-k_{max}, k_{max}]$.
+\begin{figure}[H]\centering\includegraphics[width=0.5\textwidth]{results/plots/3_2_dcf.png}\caption{3.2 One-sided radial DCF.}\end{figure}
+\begin{lstlisting}[style=matlab]
+[Ns,Nl]=size(ktraj); kmax_r=max(abs(ktraj(:)));
+kr_r=abs(ktraj(:,1)); dkr_r=kmax_r/(Ns-1);
+area_rad1d=kr_r*(2*pi/Nl)*dkr_r;
+area_rad1d(1)=pi*(dkr_r/2)^2/Nl;
+area_radial=repmat(area_rad1d,1,Nl);
+figure; plot(kr_r,area_rad1d); xlabel('k_r'); ylabel('Area');
+title('3.2 DCF (one radial line)'); grid on; saveas(gcf, fullfile(plotDir,'3_2_dcf.png'));
+\end{lstlisting}
+
+\subsection{Direct Summation (3.3)}
+Row-by-row direct summation on the one-sided radial data. Auto-oriented. \textbf{PSNR=18.23 dB, SSIM=0.4635, CPU=274.14 s.} Visible radial streak artifacts. Similar quality to the projection data case.
+\begin{figure}[H]\centering
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/3_3_image.png}\caption{DS.}\end{subfigure}\hfill
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/3_3_error.png}\caption{Error.}\end{subfigure}
+\caption{3.3 Direct summation.}\end{figure}
+\begin{figure}[H]\centering
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/3_3_horiz.png}\caption{Horizontal XS.}\end{subfigure}\hfill
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/3_3_vert.png}\caption{Vertical XS.}\end{subfigure}
+\caption{3.3 Cross-sections.}\end{figure}
+\begin{lstlisting}[style=matlab]
+Nr=256; dxr=1; taur=Nr/2;
+kxr=real(ktraj(:)); kyr=imag(ktraj(:));
+dMr=area_radial(:).*kdata(:);
+nr=(0:Nr-1)-taur;
+ima_dsr=zeros(Nr,Nr);
+t0=cputime;
+for ix=1:Nr
+    phx=exp(1j*2*pi*dxr*kxr*nr(ix));
+    phy=exp(1j*2*pi*dxr*kyr*nr);
+    ima_dsr(ix,:)=(dMr.*phx).'*phy;
+    if mod(ix,64)==0, fprintf('  3.3 row %d/%d\n',ix,Nr); end
+end
+t_dsr=cputime-t0; clear phx phy;
+ima_dsr=normImg(ima_dsr.');
+% Auto-orient
+cands={ima_dsr,flipud(ima_dsr),fliplr(ima_dsr),ima_dsr.',...
+    flipud(fliplr(ima_dsr)),rot90(ima_dsr,1),rot90(ima_dsr,3)};
+bp=-Inf;
+for ci=1:numel(cands)
+    if all(size(cands{ci})==[256 256])
+        pp=psnr(cands{ci},P); if pp>bp, bp=pp; ima_dsr=cands{ci}; end
+    end
+end
+err_dsr=abs(ima_dsr-P);
+psnr_dsr=psnr(ima_dsr,P); ssim_dsr=ssim(ima_dsr,P);
+figure; imshow(ima_dsr,[0 1]); colormap gray; colorbar;
+title('3.3 DS Radial'); saveas(gcf, fullfile(plotDir,'3_3_image.png'));
+figure; imshow(err_dsr,[0 0.2]); colormap gray; colorbar;
+title('3.3 Error'); saveas(gcf, fullfile(plotDir,'3_3_error.png'));
+figure; plot(ima_dsr(128,:),'b'); hold on; plot(P(128,:),'r--');
+legend('DS','Ref'); title('3.3 Horiz XS'); grid on; saveas(gcf,fullfile(plotDir,'3_3_horiz.png'));
+figure; plot(ima_dsr(:,128),'b'); hold on; plot(P(:,128),'r--');
+legend('DS','Ref'); title('3.3 Vert XS'); grid on; saveas(gcf,fullfile(plotDir,'3_3_vert.png'));
+\end{lstlisting}
+
+\subsection{2X Gridding (3.4)}
+To match the phantom orientation, I rotate the gridding output by $90^\circ$ counterclockwise before cropping and comparison. The result has very similar quality to direct summation but is about 900 times faster. \textbf{PSNR=18.23 dB, SSIM=0.4636, CPU=0.30 s.}
+\begin{figure}[H]\centering
+\begin{subfigure}{0.32\textwidth}\includegraphics[width=\textwidth]{results/plots/3_4_full.png}\caption{Full output.}\end{subfigure}\hfill
+\begin{subfigure}{0.32\textwidth}\includegraphics[width=\textwidth]{results/plots/3_4_crop.png}\caption{Cropped.}\end{subfigure}\hfill
+\begin{subfigure}{0.32\textwidth}\includegraphics[width=\textwidth]{results/plots/3_4_error.png}\caption{Error.}\end{subfigure}
+\caption{3.4 Gridding 2X.}\end{figure}
+\begin{figure}[H]\centering
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/3_4_horiz.png}\caption{Horizontal XS.}\end{subfigure}\hfill
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/3_4_vert.png}\caption{Vertical XS.}\end{subfigure}
+\caption{3.4 Cross-sections.}\end{figure}
+\begin{lstlisting}[style=matlab]
+t0=cputime;
+ima_g2r_full=gridkb(kdata,ktraj,area_radial,256,2,4,'image');
+t_g2r=cputime-t0;
+ima_g2r_full=normImg(rot90(ima_g2r_full,1));
+c6=256;
+ima_g2r=normImg(ima_g2r_full(c6-h5+1:c6+h5,c6-h5+1:c6+h5));
+err_g2r=abs(ima_g2r-P);
+psnr_g2r=psnr(ima_g2r,P); ssim_g2r=ssim(ima_g2r,P);
+figure; imshow(ima_g2r_full,[0 1]); colormap gray; colorbar;
+title('3.4 Full Output'); saveas(gcf, fullfile(plotDir,'3_4_full.png'));
+figure; imshow(ima_g2r,[0 1]); colormap gray; colorbar;
+title('3.4 Cropped 256x256'); saveas(gcf, fullfile(plotDir,'3_4_crop.png'));
+figure; imshow(err_g2r,[0 0.2]); colormap gray; colorbar;
+title('3.4 Error'); saveas(gcf, fullfile(plotDir,'3_4_error.png'));
+figure; plot(ima_g2r(128,:),'b'); hold on; plot(P(128,:),'r--');
+legend('Grid2X','Ref'); title('3.4 Horiz XS'); grid on; saveas(gcf,fullfile(plotDir,'3_4_horiz.png'));
+figure; plot(ima_g2r(:,128),'b'); hold on; plot(P(:,128),'r--');
+legend('Grid2X','Ref'); title('3.4 Vert XS'); grid on; saveas(gcf,fullfile(plotDir,'3_4_vert.png'));
+\end{lstlisting}
+
+\section{Results Summary}
+\begin{table}[H]\centering\caption{All results.}
+\begin{tabular}{l r r r}\toprule
+\textbf{Method} & \textbf{PSNR (dB)} & \textbf{SSIM} & \textbf{CPU (s)} \\\midrule
+1.4 Direct Sum (ref)     & $\infty$ & 1.0000 & 0.98 \\
+1.5 No DCF               & 10.86 & 0.2729 & 0.95 \\
+1.6 Double FOV           & $\infty$ & 1.0000 & 2.36 \\
+1.7 Half Pixel           & 33.67 & 0.9150 & 3.62 \\
+1.8 Double Pixel         & 18.95 & 0.6160 & 0.36 \\
+1.9 Gridding 1X          & 23.91 & 0.7537 & 0.05 \\
+1.10 Gridding 2X         & 44.35 & 0.9906 & 0.09 \\
+1.11 ScatInterp 1X       & 22.85 & 0.6705 & 0.06 \\
+1.12 ScatInterp 2X       & 24.33 & 0.7350 & 0.27 \\\midrule
+2.2 FBP                  & 26.82 & 0.6799 & 0.08 \\
+2.3 Naive BP             &  4.72 & 0.1535 & 0.08 \\
+2.6 DS (Projection)      & 20.30 & 0.4669 & 406.73 \\
+2.7 Grid (Projection)    & 20.30 & 0.4667 & 0.42 \\\midrule
+3.3 DS (Radial)          & 18.23 & 0.4635 & 274.14 \\
+3.4 Grid (Radial)        & 18.23 & 0.4636 & 0.30 \\\bottomrule
+\end{tabular}\end{table}
+
+\section{Conclusion}
+In this homework, I learned that non-Cartesian MRI reconstruction needs careful handling of sampling density, and that the choice of reconstruction method involves a trade-off between speed and accuracy.
+\begin{enumerate}
+  \item \textbf{Density compensation} is essential for correcting non-uniform sampling density. Without it, the image quality degrades significantly (PSNR dropped from $\infty$ to 10.86 dB).
+  \item \textbf{Ramp filtering} is necessary for backprojection to avoid $1/r$ blurring. Naive backprojection without the filter gave only 4.72 dB PSNR.
+  \item \textbf{Gridding reconstruction} provides an excellent trade-off between accuracy and speed. In the projection and radial cases here, it achieved nearly the same PSNR/SSIM as direct summation at roughly three orders of magnitude lower CPU time.
+\end{enumerate}
+The choice of pixel size and FOV affects both quality and computation time. Overall, gridding with 2X oversampling is a strong practical choice for non-Cartesian MRI reconstruction in this homework.

@@ -1,0 +1,1141 @@
+\documentclass[12pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb}
+\usepackage{float}
+\usepackage{subcaption}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+
+\lstset{
+  language=Python,
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{blue},
+  commentstyle=\color{gray},
+  stringstyle=\color{red},
+  breaklines=true,
+  frame=single,
+  numbers=left,
+  numberstyle=\tiny\color{gray}
+}
+
+\title{EEE 475/575 Medical Image Reconstruction \& Processing \\ Homework \#1}
+\author{Özgür Ekin Sönmez 22201966}
+\date{March 1, 2026}
+
+\begin{document}
+\maketitle
+
+%% ============================================================
+\section*{GenAI Usage Disclosure}
+GitHub Copilot (Claude Opus 4.6) was used to assist with Python code generation, structuring the Jupyter notebook, converting the given MATLAB scripts to Python, and formatting of this report. The tool was used as a coding assistant. All results were verified and interpreted by myself.
+
+%% ============================================================
+\section{Part 1: Image Domain and Fourier Domain for Photos}
+
+%% ------------------------------------------------------------
+\subsection{Part 1.1: Photo}
+
+A photo was read into the workspace, converted to grayscale, and stored as a double-precision array of size $N_x \times N_y = 1004 \times 828$. This image serves as the reference image $m_{\text{ref}}$. The centered 2D FFT was computed and the magnitude spectrum is displayed below.
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p11_ref.png}
+    \caption{Reference image $m_{\text{ref}}$}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p11_spectrum.png}
+    \caption{Magnitude spectrum of $m_{\text{ref}}$}
+\end{subfigure}
+\caption{Part 1.1: Reference image and its k-space magnitude spectrum.}
+\label{fig:p11}
+\end{figure}
+
+\textbf{Code:}
+\begin{lstlisting}
+img = plt.imread('test_image.jpeg')
+m_ref = np.mean(img, axis=2).astype(np.float64)
+Nx, Ny = m_ref.shape
+
+imshow_gray(m_ref, "1.1: Reference Image")
+M_ref = fft2c(m_ref)
+imshow_kspace(M_ref, "1.1: Magnitude Spectrum of m_ref")
+\end{lstlisting}
+
+%% ------------------------------------------------------------
+\subsection{Part 1.2: Downsampled Image}
+
+The reference image was downsampled by 2 in both $x$- and $y$-directions by keeping every other pixel. The resulting image $m_{\text{down}}$ has size $(N_x/2) \times (N_y/2) = 502 \times 414$.
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p12_down2.png}
+    \caption{Downsampled image (by 2)}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p12_spectrum.png}
+    \caption{Magnitude spectrum of downsampled image}
+\end{subfigure}
+\caption{Part 1.2: Downsampled image and its magnitude spectrum.}
+\label{fig:p12}
+\end{figure}
+
+\textbf{Code:}
+\begin{lstlisting}
+m_down2 = m_ref[::2, ::2]
+imshow_gray(m_down2, "1.2: Downsampled by 2")
+imshow_kspace(fft2c(m_down2), "1.2: Magnitude Spectrum (downsampled by 2)")
+\end{lstlisting}
+
+%% ------------------------------------------------------------
+\subsection{Part 1.3: Zero Padding in Fourier Domain (Downsample by 2)}
+
+The spectrum of $m_{\text{down}}$ was zero-padded to the original size $N_x \times N_y$ by placing it at the center of a zero array. The inverse 2D FFT yields a reconstructed image. Each image was normalized by its own maximum before computing the error image and IQA metrics.
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p13_zp_spectrum.png}
+    \caption{Zero-padded spectrum}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p13_zp_image.png}
+    \caption{Reconstructed image}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p13_error.png}
+    \caption{Error image}
+\end{subfigure}
+\caption{Part 1.3: Zero-padded reconstruction from 2$\times$ downsampled image.}
+\label{fig:p13}
+\end{figure}
+
+\textbf{Quantitative Results:} PSNR $= 49.64$ dB, SSIM $= 0.9956$.
+
+\textbf{Comment:} The reconstructed image appears nearly identical to the reference. The error image is mostly dark with faint edges visible, indicating that the lost high-frequency content is minimal. The high PSNR and SSIM confirm excellent reconstruction quality.
+
+\textbf{Code:}
+\begin{lstlisting}
+M_down2 = fft2c(m_down2)
+M_zp = np.zeros((Nx, Ny), dtype=complex)
+sx, sy = m_down2.shape
+start_x = (Nx - sx) // 2
+start_y = (Ny - sy) // 2
+M_zp[start_x:start_x+sx, start_y:start_y+sy] = M_down2
+
+imshow_kspace(M_zp, "1.3: Zero-Padded Magnitude Spectrum")
+m_zp = np.abs(ifft2c(M_zp))
+imshow_gray(m_zp, "1.3: Zero-Padded Image")
+
+m_ref_norm = m_ref / np.max(m_ref)
+m_zp_norm = m_zp / np.max(m_zp)
+imshow_gray(np.abs(m_ref_norm - m_zp_norm), "1.3: Error Image")
+print(f"PSNR: {psnr(m_ref_norm, m_zp_norm, data_range=1.0):.2f} dB")
+print(f"SSIM: {ssim(m_ref_norm, m_zp_norm, data_range=1.0):.4f}")
+\end{lstlisting}
+
+%% ------------------------------------------------------------
+\subsection{Part 1.4: Zero Padding in Fourier Domain (Downsample by 4)}
+
+The same procedure was repeated with a downsampling factor of 4. The downsampled image has size $251 \times 207$.
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p14_zp_spectrum.png}
+    \caption{Zero-padded spectrum}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p14_zp_image.png}
+    \caption{Reconstructed image}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p14_error.png}
+    \caption{Error image}
+\end{subfigure}
+\caption{Part 1.4: Zero-padded reconstruction from 4$\times$ downsampled image.}
+\label{fig:p14}
+\end{figure}
+
+\textbf{Quantitative Results:} PSNR $= 36.83$ dB, SSIM $= 0.9646$.
+
+\textbf{Comment:} The reconstructed image is noticeably blurrier than the reference. Fine details such as edges and textures are lost. The error image clearly shows these differences, particularly at edges and high-frequency regions. Both PSNR and SSIM drop significantly compared to Part 1.3, consistent with the greater information loss. However, both are also great results because of the type of the image. If my image had more details, it would have been difficult to recover with this quality. I checked it with a different image and achieved less reconstruction quality. 
+
+\textbf{Code:}
+\begin{lstlisting}
+m_down4 = m_ref[::4, ::4]
+M_down4 = fft2c(m_down4)
+M_zp4 = np.zeros((Nx, Ny), dtype=complex)
+sx4, sy4 = m_down4.shape
+start_x4 = (Nx - sx4) // 2
+start_y4 = (Ny - sy4) // 2
+M_zp4[start_x4:start_x4+sx4, start_y4:start_y4+sy4] = M_down4
+
+imshow_kspace(M_zp4, "1.4: Zero-Padded Magnitude Spectrum (4x)")
+m_zp4 = np.abs(ifft2c(M_zp4))
+imshow_gray(m_zp4, "1.4: Zero-Padded Image (4x)")
+
+m_zp4_norm = m_zp4 / np.max(m_zp4)
+imshow_gray(np.abs(m_ref_norm - m_zp4_norm), "1.4: Error Image (4x)")
+print(f"PSNR: {psnr(m_ref_norm, m_zp4_norm, data_range=1.0):.2f} dB")
+print(f"SSIM: {ssim(m_ref_norm, m_zp4_norm, data_range=1.0):.4f}")
+\end{lstlisting}
+
+%% ------------------------------------------------------------
+\subsection{Part 1.5: Comments on PSNR and SSIM}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|l|c|c|}
+\hline
+\textbf{Case} & \textbf{PSNR (dB)} & \textbf{SSIM} \\
+\hline
+2$\times$ downsampled + zero-padded (Part 1.3) & 49.64 & 0.9956 \\
+4$\times$ downsampled + zero-padded (Part 1.4) & 36.83 & 0.9646 \\
+\hline
+\end{tabular}
+\caption{Summary of IQA metrics for Part 1.}
+\label{tab:p1_iqa}
+\end{table}
+
+Both PSNR and SSIM decrease consistently with higher downsampling factors. The 2$\times$ downsampled case retains most of the high-frequency content, resulting in near-perfect reconstruction (PSNR $\approx 50$ dB, SSIM $\approx 1$). The 4$\times$ case loses significantly more information, reflected in both lower metric values and visibly blurrier images.
+
+The error images confirm that the differences are concentrated at edges and fine textures, which is expected since zero-padding in the Fourier domain performs sinc interpolation and cannot recover lost high-frequency details. Overall, \textbf{PSNR and SSIM accurately reflect the visual observations} in this part of the homework.
+
+%% ============================================================
+\section{Part 2: K-space Domain and Image Domain for MRI }
+
+%% ------------------------------------------------------------
+\subsection{Part 2.1: k-space Data}
+
+The k-space data was loaded from \texttt{ge\_phantom.mat}. The data array \texttt{kdata} is $256 \times 256$ complex-valued ($N_\text{ro} = 256$, $N_\text{pe} = 256$). The complex-valued MRI image $m_f$ was obtained by applying the centered inverse 2D FFT. The magnitude, phase, real, and imaginary parts are displayed below.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.48\textwidth]{figures/p21_kspace.png}
+\caption{Part 2.1: k-space magnitude spectrum (log scale).}
+\label{fig:p21_kspace}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p21_magnitude.png}
+    \caption{Magnitude $|m_f|$}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p21_phase.png}
+    \caption{Phase $\angle m_f$}
+\end{subfigure}
+
+\vspace{0.5em}
+\begin{subfigure}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p21_real.png}
+    \caption{Real part $\mathrm{Re}(m_f)$}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p21_imag.png}
+    \caption{Imaginary part $\mathrm{Im}(m_f)$}
+\end{subfigure}
+\caption{Part 2.1: Complex-valued MRI image components.}
+\label{fig:p21_image}
+\end{figure}
+
+The magnitude image $m_\text{ref,mri} = |m_f|$ serves as the reference image for subsequent parts. All images in Part~2 are normalized by $\text{max\_val} = \max(m_\text{ref,mri})$.
+
+\textbf{Code:}
+\begin{lstlisting}
+kdata = data['kdata']
+Nro, Npe = kdata.shape
+
+imshow_kspace(kdata, "2.1: k-space Magnitude Spectrum")
+
+m_f = ifft2c(kdata)
+imshow_gray(np.abs(m_f), "2.1: Magnitude Image")
+imshow_gray(np.angle(m_f), "2.1: Phase Image")
+imshow_gray(np.real(m_f), "2.1: Real Part")
+imshow_gray(np.imag(m_f), "2.1: Imaginary Part")
+
+m_ref_mri = np.abs(m_f)
+max_val = np.max(m_ref_mri)
+\end{lstlisting}
+
+%% ------------------------------------------------------------
+\subsection{Part 2.2: Skipping Lines in k-space}
+
+Every other phase-encode (PE) line was kept, yielding a $256 \times 128$ k-space array. The magnitude image reconstructed from this smaller k-space has half the FOV in the PE direction.
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p22_kspace.png}
+    \caption{k-space (every other PE line)}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p22_image.png}
+    \caption{Magnitude image}
+\end{subfigure}
+\caption{Part 2.2: Downsampled k-space (skip 2 in PE) and its magnitude image.}
+\label{fig:p22}
+\end{figure}
+
+\textbf{Code:}
+\begin{lstlisting}
+kdata_skip2 = kdata[:, ::2]
+imshow_kspace(kdata_skip2, "2.2: k-space (every other PE line kept)")
+m_skip2 = np.abs(ifft2c(kdata_skip2))
+imshow_gray(m_skip2, "2.2: Magnitude Image (skip 2 in PE)")
+\end{lstlisting}
+
+%% ------------------------------------------------------------
+\subsection{Part 2.3: Zero-Fill Every Other PE Line (Downsample by 2)}
+
+Instead of removing lines, every other PE line was set to zero while keeping the full $256 \times 256$ array. This preserves the original matrix size but introduces aliasing (ghosting) artifacts because the effective sampling rate in PE is halved.
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p23_kspace.png}
+    \caption{k-space (zero-filled)}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p23_image.png}
+    \caption{Magnitude image}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p23_error.png}
+    \caption{Error image}
+\end{subfigure}
+\caption{Part 2.3: Zero-filling every other PE line (2$\times$ undersampling).}
+\label{fig:p23}
+\end{figure}
+
+\textbf{Quantitative Results:} PSNR $= 14.19$ dB, SSIM $= 0.4634$.
+
+\textbf{Comment:} A ghost copy of the phantom appears shifted by half the FOV in the PE direction, overlapping with the original object. The error image shows the aliased ghost pattern clearly.
+
+\textbf{Code:}
+\begin{lstlisting}
+kdata_zf2 = kdata.copy()
+kdata_zf2[:, 1::2] = 0
+
+m_zf2 = np.abs(ifft2c(kdata_zf2))
+err_23 = np.abs(m_zf2 - m_ref_mri)
+imshow_gray(err_23, "2.3: Error Image", vrange=[0, 0.2*max_val])
+
+print(f"PSNR: {psnr(m_ref_mri/max_val, m_zf2/max_val, data_range=1.0):.2f} dB")
+print(f"SSIM: {ssim(m_ref_mri/max_val, m_zf2/max_val, data_range=1.0):.4f}")
+\end{lstlisting}
+
+%% ------------------------------------------------------------
+\subsection{Part 2.4: Zero-Fill 3 of Every 4 PE Lines (Downsample by 4)}
+
+Three out of every four PE lines were zeroed, keeping only every 4th line. This 4$\times$ undersampling produces severe aliasing with four overlapping ghost copies.
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p24_kspace.png}
+    \caption{k-space (zero-filled)}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p24_image.png}
+    \caption{Magnitude image}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p24_error.png}
+    \caption{Error image}
+\end{subfigure}
+\caption{Part 2.4: Zero-filling 3 of every 4 PE lines (4$\times$ undersampling).}
+\label{fig:p24}
+\end{figure}
+
+\textbf{Quantitative Results:} PSNR $= 12.58$ dB, SSIM $= 0.2212$.
+
+\textbf{Comment:} Four ghost copies of the phantom overlap, producing severe aliasing. The error image is much brighter than in Part~2.3, and both PSNR and SSIM drop significantly compared to the 2$\times$ case.
+
+\textbf{Code:}
+\begin{lstlisting}
+kdata_zf4 = kdata.copy()
+kdata_zf4[:, 1::4] = 0
+kdata_zf4[:, 2::4] = 0
+kdata_zf4[:, 3::4] = 0
+
+m_zf4 = np.abs(ifft2c(kdata_zf4))
+err_24 = np.abs(m_zf4 - m_ref_mri)
+
+print(f"PSNR: {psnr(m_ref_mri/max_val, m_zf4/max_val, data_range=1.0):.2f} dB")
+print(f"SSIM: {ssim(m_ref_mri/max_val, m_zf4/max_val, data_range=1.0):.4f}")
+\end{lstlisting}
+
+%% ------------------------------------------------------------
+\subsection{Part 2.5: Acquiring Fewer Lines -- Central Half of PE}
+
+Only the central 128 PE lines (indices 64--191) were kept, discarding the outer high-frequency lines. The resulting $256 \times 128$ k-space was reconstructed directly. The image has half the resolution in the PE direction compared to Part~2.2, but no aliasing occurs.
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p25_kspace.png}
+    \caption{k-space (central half PE)}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p25_image.png}
+    \caption{Magnitude image}
+\end{subfigure}
+\caption{Part 2.5: Central half of PE lines and its magnitude image.}
+\label{fig:p25}
+\end{figure}
+
+\textbf{Code:}
+\begin{lstlisting}
+kdata_central_half = kdata[:, Npe//4 : 3*Npe//4]
+imshow_kspace(kdata_central_half, "2.5: k-space (central half PE)")
+m_central_half = np.abs(ifft2c(kdata_central_half))
+imshow_gray(m_central_half, "2.5: Magnitude Image (central half PE)")
+\end{lstlisting}
+
+%% ------------------------------------------------------------
+\subsection{Part 2.6: Central Half of PE, Zero-Fill the Rest}
+
+The central 128 PE lines were placed into a $256 \times 256$ zero array and the inverse FFT was applied. This produces a full-size image but with blurring due to the missing high-frequency PE lines.
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p26_kspace.png}
+    \caption{k-space (zero-filled)}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p26_image.png}
+    \caption{Magnitude image}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p26_error.png}
+    \caption{Error image}
+\end{subfigure}
+\caption{Part 2.6: Central half PE, zero-filled to $256 \times 256$.}
+\label{fig:p26}
+\end{figure}
+
+\textbf{Quantitative Results:} PSNR $= 26.96$ dB, SSIM $= 0.7291$.
+
+\textbf{Comment:} The image is blurred but free of ghosts. The error image highlights the edges and fine details that were lost due to the missing high-frequency PE content. Compared to the aliased cases (2.3, 2.4), this approach yields much higher PSNR and SSIM despite using the same number of PE lines as Part~2.3.
+
+\textbf{Code:}
+\begin{lstlisting}
+kdata_26 = np.zeros_like(kdata)
+kdata_26[:, Npe//4 : 3*Npe//4] = kdata[:, Npe//4 : 3*Npe//4]
+
+m_26 = np.abs(ifft2c(kdata_26))
+err_26 = np.abs(m_26 - m_ref_mri)
+
+print(f"PSNR: {psnr(m_ref_mri/max_val, m_26/max_val, data_range=1.0):.2f} dB")
+print(f"SSIM: {ssim(m_ref_mri/max_val, m_26/max_val, data_range=1.0):.4f}")
+\end{lstlisting}
+
+%% ------------------------------------------------------------
+\subsection{Part 2.7: Central 1/4th of PE, Zero-Fill the Rest}
+
+Only the central 64 PE lines (indices 96--159) were retained and placed into a $256 \times 256$ zero array. This more aggressive truncation further reduces resolution.
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p27_kspace.png}
+    \caption{k-space (zero-filled)}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p27_image.png}
+    \caption{Magnitude image}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p27_error.png}
+    \caption{Error image}
+\end{subfigure}
+\caption{Part 2.7: Central 1/4 PE, zero-filled to $256 \times 256$.}
+\label{fig:p27}
+\end{figure}
+
+\textbf{Quantitative Results:} PSNR $= 23.37$ dB, SSIM $= 0.5716$.
+
+\textbf{Comment:} The image is noticeably more blurred than Part~2.6. Fine structures such as the spokes and small holes in the phantom are barely distinguishable. The error image shows stronger residuals across all edges. Both PSNR and SSIM decrease compared to Part~2.6.
+
+\textbf{Code:}
+\begin{lstlisting}
+kdata_27 = np.zeros_like(kdata)
+kdata_27[:, 3*Npe//8 : 5*Npe//8] = kdata[:, 3*Npe//8 : 5*Npe//8]
+
+m_27 = np.abs(ifft2c(kdata_27))
+err_27 = np.abs(m_27 - m_ref_mri)
+
+print(f"PSNR: {psnr(m_ref_mri/max_val, m_27/max_val, data_range=1.0):.2f} dB")
+print(f"SSIM: {ssim(m_ref_mri/max_val, m_27/max_val, data_range=1.0):.4f}")
+\end{lstlisting}
+
+%% ------------------------------------------------------------
+\subsection{Part 2.8: Comments on PSNR and SSIM}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|l|c|c|c|}
+\hline
+\textbf{Case} & \textbf{PE Lines Used} & \textbf{PSNR (dB)} & \textbf{SSIM} \\
+\hline
+Skip 2, zero-fill (Part 2.3) & 128 (uniform) & 14.19 & 0.4634 \\
+Skip 4, zero-fill (Part 2.4) & 64 (uniform) & 12.58 & 0.2212 \\
+Central half, zero-fill (Part 2.6) & 128 (central) & 26.96 & 0.7291 \\
+Central 1/4, zero-fill (Part 2.7) & 64 (central) & 23.37 & 0.5716 \\
+\hline
+\end{tabular}
+\caption{Summary of IQA metrics for Part 2.}
+\label{tab:p2_iqa}
+\end{table}
+
+\textbf{Uniform undersampling (skipping lines)} produces aliasing/ghosting. Ghost copies of the object fold into the image, severely degrading both PSNR and SSIM. Increasing the undersampling factor from 2$\times$ to 4$\times$ worsens both metrics further (PSNR drops from 14.19 to 12.58\,dB; SSIM from 0.46 to 0.22).
+
+\textbf{Central k-space acquisition (fewer lines)} produces blurring instead of aliasing. Because most of the signal energy is concentrated near the center of k-space, retaining the central lines preserves gross image contrast. The loss is mainly in edge detail and spatial resolution. This strategy yields substantially better metrics: 128 central lines (Part~2.6) achieve PSNR $= 26.96$\,dB vs.\ 14.19\,dB for 128 uniformly-spaced lines (Part~2.3), despite using the same number of PE lines.
+
+\textbf{Key comparison:} Parts 2.3 and 2.6 both use 128 PE lines, and Parts 2.4 and 2.7 both use 64 PE lines. In both cases the central-k-space approach dramatically outperforms the uniform-skipping approach in PSNR and SSIM. This underscores that \textbf{which k-space lines are acquired matters more than how many}. Aliasing artifacts are more perceptually and quantitatively damaging than the smooth blurring caused by missing high-frequency data.
+
+%% ============================================================
+\section{Part 3: Phase-Compensated MRI Image }
+
+A low-resolution phase image is estimated from the central portion of k-space, then used to remove the phase from the full complex-valued MRI image $m_f(x,y)$. The phase-compensated image is
+\[
+m_\text{pc}(x,y) = \max\!\bigl(\operatorname{Re}\{m_f(x,y)\,p^*(x,y)\},\;0\bigr),
+\]
+where $p(x,y) = e^{j\angle m_l(x,y)}$ is the unit-magnitude phase map derived from the low-resolution image $m_l$.
+
+%% ------------------------------------------------------------
+\subsection{Part 3.1: Central $\pm 1/8$ (25\%, 64 PE Lines)}
+
+The central $\pm N_\text{pe}/8 = \pm 32$ lines (64 total, 25\% of k-space) were placed in a zero-filled $256 \times 256$ array and inverse-transformed to obtain the low-resolution complex image $m_l$. The estimated phase and phase-compensated image are shown below.
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p31_phase.png}
+    \caption{Phase image $\angle m_l$}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p31_pc.png}
+    \caption{Phase-compensated image}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p31_error.png}
+    \caption{Error image}
+\end{subfigure}
+\caption{Part 3.1: Phase compensation using central 25\% of k-space.}
+\label{fig:p31}
+\end{figure}
+
+\textbf{Quantitative Results:} PSNR $= 29.10$ dB, SSIM $= 0.7894$.
+
+\textbf{Code:}
+\begin{lstlisting}
+half_w = Npe // 8  # 32
+center = Npe // 2  # 128
+kdata_low31 = np.zeros_like(kdata)
+kdata_low31[:, center - half_w : center + half_w] = kdata[:, center - half_w : center + half_w]
+
+m_low31 = ifft2c(kdata_low31)
+p31 = np.exp(1j * np.angle(m_low31))
+
+m_pc31 = np.maximum(np.real(m_f * np.conj(p31)), 0)
+err_31 = np.abs(m_pc31 - m_ref_mri)
+\end{lstlisting}
+
+%% ------------------------------------------------------------
+\subsection{Part 3.2: Central $\pm 1/16$ (12.5\%, 32 PE Lines)}
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p32_phase.png}
+    \caption{Phase image}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p32_pc.png}
+    \caption{Phase-compensated image}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p32_error.png}
+    \caption{Error image}
+\end{subfigure}
+\caption{Part 3.2: Phase compensation using central 12.5\% of k-space.}
+\label{fig:p32}
+\end{figure}
+
+\textbf{Quantitative Results:} PSNR $= 27.48$ dB, SSIM $= 0.6903$.
+
+%% ------------------------------------------------------------
+\subsection{Part 3.3: Central $\pm 1/32$ (6.25\%, 16 PE Lines)}
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p33_phase.png}
+    \caption{Phase image}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p33_pc.png}
+    \caption{Phase-compensated image}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p33_error.png}
+    \caption{Error image}
+\end{subfigure}
+\caption{Part 3.3: Phase compensation using central 6.25\% of k-space.}
+\label{fig:p33}
+\end{figure}
+
+\textbf{Quantitative Results:} PSNR $= 25.72$ dB, SSIM $= 0.6169$.
+
+%% ------------------------------------------------------------
+\subsection{Part 3.4: Central $\pm 1/64$ (3.125\%, 8 PE Lines)}
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p34_phase.png}
+    \caption{Phase image}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p34_pc.png}
+    \caption{Phase-compensated image}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p34_error.png}
+    \caption{Error image}
+\end{subfigure}
+\caption{Part 3.4: Phase compensation using central 3.125\% of k-space.}
+\label{fig:p34}
+\end{figure}
+
+\textbf{Quantitative Results:} PSNR $= 25.16$ dB, SSIM $= 0.5882$.
+
+%% ------------------------------------------------------------
+\subsection{Part 3.5: Comments on Phase-Compensated Image Quality}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|l|c|c|c|c|}
+\hline
+\textbf{Part} & \textbf{Central Ratio} & \textbf{PE Lines} & \textbf{PSNR (dB)} & \textbf{SSIM} \\
+\hline
+3.1 ($\pm 1/8$) & 25\% & 64 & 29.10 & 0.7894 \\
+3.2 ($\pm 1/16$) & 12.5\% & 32 & 27.48 & 0.6903 \\
+3.3 ($\pm 1/32$) & 6.25\% & 16 & 25.72 & 0.6169 \\
+3.4 ($\pm 1/64$) & 3.125\% & 8 & 25.16 & 0.5882 \\
+\hline
+\end{tabular}
+\caption{Summary of IQA metrics for Part 3 (phase-compensated images).}
+\label{tab:p3_iqa}
+\end{table}
+
+As the central k-space ratio decreases from 25\% to 3.125\%, both PSNR and SSIM decrease monotonically ($29.10 \to 25.16$\,dB; $0.79 \to 0.59$). This is expected: a larger portion of central k-space produces a smoother, more accurate estimate of the slowly-varying background phase. With fewer PE lines, the phase estimate becomes noisier and captures less spatial variation, leading to residual phase errors that convert into signal loss in the real-part operation.
+
+Visually, the phase images become increasingly coarse and banded as the central ratio shrinks. Despite this, the phase-compensated images remain recognizable even at 3.125\%, because the dominant low-frequency phase is still roughly captured. The error images show that the residual errors are concentrated near edges and regions of rapid phase transition, and grow more prominent with smaller ratios.
+
+%% ------------------------------------------------------------
+\subsection{Part 3.6: Comments on PSNR and SSIM}
+
+PSNR and SSIM accurately reflect the visual observations in this part. Both metrics decrease smoothly with the central k-space ratio, matching the progressive degradation visible in the error images. The largest drop occurs between 25\% and 12.5\% (PSNR drops $\approx 1.6$\,dB, SSIM drops $\approx 0.10$), while subsequent reductions show diminishing marginal degradation. This indicates that the most important phase information is contained in the central few percent of k-space, and adding more lines beyond that yields incrementally better (but less dramatic) improvements.
+
+%% ============================================================
+\section{Part 4: Partial k-space Reconstruction with POCS }
+
+%% ------------------------------------------------------------
+\subsection{Part 4.1: Zero-Fill (ZF) Reconstruction}
+
+A 5/8th partial k-space dataset was generated by retaining the first $5N_\text{pe}/8 = 160$ PE lines and setting the remaining 96 lines to zero. The zero-fill (ZF) reconstruction is obtained by simply taking $|F^{-1}\{\text{partial k-space}\}|$.
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p41_kspace.png}
+    \caption{5/8 partial k-space}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p41_zf.png}
+    \caption{ZF reconstruction}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p41_error.png}
+    \caption{Error image}
+\end{subfigure}
+\caption{Part 4.1: Zero-fill reconstruction from 5/8 partial k-space.}
+\label{fig:p41}
+\end{figure}
+
+\textbf{Quantitative Results:} PSNR $= 27.66$ dB, SSIM $= 0.7814$.
+
+\textbf{Comment:} The ZF reconstruction shows the phantom with reasonable fidelity but with visible Gibbs ringing and asymmetric blurring caused by the truncated k-space. The error image reveals edge artifacts concentrated along the PE direction. The quality is comparable to the phase-compensated full-k-space image from Part~3.1 (PSNR $= 29.10$\,dB), but lower because the missing 3/8 of k-space has not been estimated.
+
+\textbf{Code:}
+\begin{lstlisting}
+Nacq = 5 * Npe // 8  # 160 acquired lines
+kdata_partial = np.zeros_like(kdata)
+kdata_partial[:, :Nacq] = kdata[:, :Nacq]
+
+m_zf = np.abs(ifft2c(kdata_partial))
+err_41 = np.abs(m_zf - m_ref_mri)
+\end{lstlisting}
+
+%% ------------------------------------------------------------
+\subsection{Part 4.2: POCS Reconstruction}
+
+The Projection Onto Convex Sets (POCS) algorithm iteratively enforces two constraints: (1)~the image should be real-valued and non-negative after phase compensation, and (2)~the acquired k-space lines must be preserved. The phase map $p(x,y)$ from Part~3.1 (central 25\%) was used. At each iteration $i$, the output image is $m_{\text{out}} = |\operatorname{Re}\{m_i(x,y)\,p^*(x,y)\}|$.
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p42_iter1_image.png}
+    \caption{Iter 1: Output}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p42_iter1_kspace.png}
+    \caption{Iter 1: k-space}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p42_iter1_error.png}
+    \caption{Iter 1: Error}
+\end{subfigure}
+
+\vspace{0.5em}
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p42_iter2_image.png}
+    \caption{Iter 2: Output}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p42_iter2_kspace.png}
+    \caption{Iter 2: k-space}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p42_iter2_error.png}
+    \caption{Iter 2: Error}
+\end{subfigure}
+
+\vspace{0.5em}
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p42_iter3_image.png}
+    \caption{Iter 3: Output}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p42_iter3_kspace.png}
+    \caption{Iter 3: k-space}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p42_iter3_error.png}
+    \caption{Iter 3: Error}
+\end{subfigure}
+\caption{Part 4.2: POCS reconstruction — Iterations 1--3 (output image, k-space, error).}
+\label{fig:p42a}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p42_iter4_image.png}
+    \caption{Iter 4: Output}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p42_iter4_kspace.png}
+    \caption{Iter 4: k-space}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p42_iter4_error.png}
+    \caption{Iter 4: Error}
+\end{subfigure}
+
+\vspace{0.5em}
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p42_iter5_image.png}
+    \caption{Iter 5: Output}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p42_iter5_kspace.png}
+    \caption{Iter 5: k-space}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p42_iter5_error.png}
+    \caption{Iter 5: Error}
+\end{subfigure}
+\caption{Part 4.2: POCS reconstruction — Iterations 4--5 (output image, k-space, error).}
+\label{fig:p42b}
+\end{figure}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|c|c|c|}
+\hline
+\textbf{Iteration} & \textbf{PSNR (dB)} & \textbf{SSIM} \\
+\hline
+ZF (Part 4.1) & 27.66 & 0.7814 \\
+POCS Iter 1 & 26.89 & 0.7182 \\
+POCS Iter 2 & 27.61 & 0.7271 \\
+POCS Iter 3 & 27.47 & 0.7206 \\
+POCS Iter 4 & 27.29 & 0.7154 \\
+POCS Iter 5 & 27.15 & 0.7114 \\
+\hline
+\end{tabular}
+\caption{Summary of IQA metrics for Part 4 (ZF and POCS iterations).}
+\label{tab:p4_iqa}
+\end{table}
+
+\textbf{Comment:} The POCS algorithm starts from the ZF reconstruction and iteratively projects between the image-domain constraint (real-valued, non-negative after phase removal) and the data-consistency constraint (acquired k-space lines preserved). After the first iteration, the PSNR is slightly lower than ZF (26.89 vs.\ 27.66\,dB) because the phase compensation introduces some error from the imperfect low-resolution phase estimate. By iteration~2 the POCS result improves to 27.61\,dB as the algorithm fills in the missing k-space data. Subsequent iterations show gradual convergence with PSNR stabilizing around 27\,dB.
+
+Visually, the POCS iterations progressively reduce the Gibbs ringing visible in the ZF image, particularly along edges in the PE direction. The error images become more uniform (less structured) across iterations, indicating that the algorithm is successfully estimating the missing high-frequency k-space data. The k-space spectra show the non-acquired region being filled in with each iteration.
+
+The overall quality of the POCS reconstruction is bounded by the accuracy of the phase estimate $p(x,y)$ from Part~3.1, consistent with the homework note that partial k-space reconstructions cannot exceed the quality of $m_\text{pc}$ (PSNR $= 29.10$\,dB from Part~3.1).
+
+\textbf{Code:}
+\begin{lstlisting}
+p = p31  # phase from Part 3.1
+acquired_mask = np.zeros((Nro, Npe), dtype=bool)
+acquired_mask[:, :Nacq] = True
+
+D_i = kdata_partial.copy()
+
+for i in range(1, 6):
+    m_i = ifft2c(D_i)
+    m_out = np.abs(np.real(m_i * np.conj(p)))
+    m_hat = m_out * p
+    D_hat = fft2c(m_hat)
+    D_i = D_hat.copy()
+    D_i[acquired_mask] = kdata[acquired_mask]
+\end{lstlisting}
+
+%% ------------------------------------------------------------
+\subsection{Part 4.3: 9/16 Partial k-space — ZF vs POCS}
+
+The first 9/16 of PE lines are retained ($N_\text{acq} = 144$, ratio $= 0.5625$). A ZF reconstruction and 5-iteration POCS reconstruction are compared.
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p43_kspace.png}
+    \caption{Partial k-space}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p43_zf.png}
+    \caption{ZF reconstruction}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p43_pocs.png}
+    \caption{POCS (5th iter)}
+\end{subfigure}
+
+\vspace{0.3cm}
+
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p43_error_zf.png}
+    \caption{Error (ZF)}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p43_error_pocs.png}
+    \caption{Error (POCS)}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p43_kspace_pocs.png}
+    \caption{k-space of POCS output}
+\end{subfigure}
+\caption{Part 4.3: ZF vs POCS for 9/16 partial k-space ($N_\text{acq}=144$).}
+\label{fig:p43}
+\end{figure}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|c|c|c|}
+\hline
+\textbf{Method} & \textbf{PSNR (dB)} & \textbf{SSIM} \\
+\hline
+ZF  & 24.43 & 0.7092 \\
+POCS (5th iter) & 27.02 & 0.7079 \\
+\hline
+\end{tabular}
+\caption{IQA metrics for Part 4.3 (9/16 partial k-space).}
+\label{tab:p43}
+\end{table}
+
+%% ------------------------------------------------------------
+\subsection{Part 4.4: 17/32 Partial k-space — ZF vs POCS}
+
+The first 17/32 of PE lines are retained ($N_\text{acq} = 136$, ratio $= 0.53125$).
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p44_kspace.png}
+    \caption{Partial k-space}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p44_zf.png}
+    \caption{ZF reconstruction}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p44_pocs.png}
+    \caption{POCS (5th iter)}
+\end{subfigure}
+
+\vspace{0.3cm}
+
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p44_error_zf.png}
+    \caption{Error (ZF)}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p44_error_pocs.png}
+    \caption{Error (POCS)}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p44_kspace_pocs.png}
+    \caption{k-space of POCS output}
+\end{subfigure}
+\caption{Part 4.4: ZF vs POCS for 17/32 partial k-space ($N_\text{acq}=136$).}
+\label{fig:p44}
+\end{figure}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|c|c|c|}
+\hline
+\textbf{Method} & \textbf{PSNR (dB)} & \textbf{SSIM} \\
+\hline
+ZF  & 21.76 & 0.6373 \\
+POCS (5th iter) & 26.89 & 0.7033 \\
+\hline
+\end{tabular}
+\caption{IQA metrics for Part 4.4 (17/32 partial k-space).}
+\label{tab:p44}
+\end{table}
+
+%% ------------------------------------------------------------
+\subsection{Part 4.5: 33/64 Partial k-space — ZF vs POCS}
+
+The first 33/64 of PE lines are retained ($N_\text{acq} = 132$, ratio $= 0.515625$).
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p45_kspace.png}
+    \caption{Partial k-space}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p45_zf.png}
+    \caption{ZF reconstruction}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p45_pocs.png}
+    \caption{POCS (5th iter)}
+\end{subfigure}
+
+\vspace{0.3cm}
+
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p45_error_zf.png}
+    \caption{Error (ZF)}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p45_error_pocs.png}
+    \caption{Error (POCS)}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.32\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/p45_kspace_pocs.png}
+    \caption{k-space of POCS output}
+\end{subfigure}
+\caption{Part 4.5: ZF vs POCS for 33/64 partial k-space ($N_\text{acq}=132$).}
+\label{fig:p45}
+\end{figure}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|c|c|c|}
+\hline
+\textbf{Method} & \textbf{PSNR (dB)} & \textbf{SSIM} \\
+\hline
+ZF  & 20.09 & 0.5891 \\
+POCS (5th iter) & 26.64 & 0.6960 \\
+\hline
+\end{tabular}
+\caption{IQA metrics for Part 4.5 (33/64 partial k-space).}
+\label{tab:p45}
+\end{table}
+
+%% ------------------------------------------------------------
+\subsection{Part 4.6: Comment on ZF vs POCS as a Function of Partial k-space Ratio}
+
+Table~\ref{tab:p4_summary} summarizes the ZF and POCS (5th iteration) results across all four partial k-space ratios.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|c|c|c|c|c|c|}
+\hline
+\textbf{Part} & \textbf{Ratio} & \textbf{$N_\text{acq}$} & \textbf{ZF PSNR / SSIM} & \textbf{POCS PSNR / SSIM} \\
+\hline
+4.1/4.2 & 5/8   & 160 & 27.66\,dB / 0.7814 & 27.15\,dB / 0.7114 \\
+4.3     & 9/16  & 144 & 24.43\,dB / 0.7092 & 27.02\,dB / 0.7079 \\
+4.4     & 17/32 & 136 & 21.76\,dB / 0.6373 & 26.89\,dB / 0.7033 \\
+4.5     & 33/64 & 132 & 20.09\,dB / 0.5891 & 26.64\,dB / 0.6960 \\
+\hline
+\end{tabular}
+\caption{Summary of ZF and POCS (5th iteration) IQA metrics across partial k-space ratios.}
+\label{tab:p4_summary}
+\end{table}
+
+\textbf{Comment:} Two clear trends emerge as the partial k-space ratio decreases from $5/8$ toward $1/2$:
+
+\begin{enumerate}
+    \item \textbf{ZF reconstruction degrades rapidly.} The ZF PSNR drops from 27.66\,dB ($5/8$) to 20.09\,dB ($33/64$) which is a loss of more than 7.5\,dB. The ZF SSIM similarly drops from 0.78 to 0.59. This is expected because the ZF method simply sets missing k-space lines to zero, which introduces increasingly severe Gibbs-like truncation artifacts and signal intensity loss as more data is absent.
+
+    \item \textbf{POCS reconstruction is remarkably robust.} The POCS PSNR decreases only from 27.15\,dB to 26.64\,dB which is a a modest 0.5\,dB drop, and SSIM stays between 0.71 and 0.70 across all ratios. POCS effectively exploits the conjugate symmetry of k-space via the phase estimate, so even when nearly half of k-space is missing, it can synthesize the absent data to a quality comparable to the phase-compensated image upper bound ($\approx 29$\,dB from Part~3.1).
+\end{enumerate}
+
+The benefit of POCS over ZF therefore \emph{increases} as the partial k-space ratio decreases. At $5/8$, ZF and POCS are comparable ($\Delta$PSNR $\approx -0.5$\,dB). At $33/64$, POCS outperforms ZF by over 6.5\,dB. This demonstrates that POCS is most valuable precisely in the regime where the scan-time savings are greatest.
+
+%% ------------------------------------------------------------
+\subsection{Part 4.7: Do PSNR and SSIM Reflect Visual Observations?}
+
+\textbf{Comment:} Yes, the quantitative metrics are consistent with visual observations:
+
+\begin{itemize}
+    \item The ZF error images show progressively stronger structured artifacts (edge ringing, intensity asymmetry) as the ratio decreases. This is captured by the rapidly declining PSNR and SSIM values.
+    \item The POCS error images remain relatively uniform and low-magnitude across all ratios, with only subtle increases in the spiral-pattern region (which has the most complex structure). The near-constant PSNR/SSIM values for POCS reflect this visual stability.
+    \item Visually, the POCS images are difficult to distinguish from each other across ratios, while the ZF images show obvious degradation, consistent with the quantitative gap which is from $\sim$0\,dB to $\sim$6.5\,dB.
+\end{itemize}
+
+One nuance: for the $5/8$ case, POCS has a slightly \emph{lower} PSNR than ZF (27.15 vs.\ 27.66), yet visually the POCS image appears sharper with less ringing. This suggests that at high acquisition ratios, the phase-compensation step introduces a small amount of distributed error that lowers PSNR but does not impact perceived quality. SSIM partially captures this: the POCS SSIM is lower (0.71 vs.\ 0.78), indicating that the structural fidelity trade-off is real but may be acceptable given the reduction in coherent artifacts. Overall, PSNR and SSIM are useful summary metrics, but visual inspection remains important.
+
+\end{document}

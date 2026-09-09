@@ -1,0 +1,388 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[utf8]{inputenc}\usepackage[T1]{fontenc}
+\usepackage{geometry}\geometry{margin=2cm}
+\usepackage{graphicx}\usepackage{amsmath,amssymb}\usepackage{float}
+\usepackage{caption,subcaption}\usepackage{booktabs}\usepackage{hyperref}
+\usepackage{listings}\usepackage{xcolor}\usepackage{parskip}
+\lstdefinestyle{matlab}{language=Matlab,basicstyle=\ttfamily\scriptsize,
+keywordstyle=\color{blue},commentstyle=\color{green!50!black},
+stringstyle=\color{orange},numbers=left,numberstyle=\tiny\color{gray},
+breaklines=true,frame=single,backgroundcolor=\color{gray!5}}
+\title{\textbf{EEE 475/575 -- Medical Image Reconstruction}\\[0.3em]\large Homework \#2}
+\author{\"Ozg\"ur Ekin S\"onmez}\date{31 March 2026}
+\begin{document}\maketitle\tableofcontents\newpage
+
+\section*{GenAI Usage Disclosure}
+\addcontentsline{toc}{section}{GenAI Usage Disclosure}
+I used Google Gemini (Antigravity) to help me structure the MATLAB code and format this report. I checked all results myself and I can explain every part.
+
+\section{Part I: Gridding Reconstruction (Spiral Data)}
+
+\subsection{K-Space Trajectory (1.1)}
+The spiral k-space data consists of 6 interleaves with 2048 samples each. The trajectory spirals outward from the k-space center, giving denser sampling near DC and sparser sampling at higher spatial frequencies.
+\begin{figure}[H]\centering\includegraphics[width=0.55\textwidth]{results/plots/1_1_spiral_trajectory.png}\caption{Spiral k-space trajectory.}\end{figure}
+\begin{lstlisting}[style=matlab]
+load('spiral.mat');
+figure; plot(ktraj); xlabel('k_x'); ylabel('k_y');
+title('Interleaved Spiral K-Space Trajectory'); axis equal; grid on;
+saveas(gcf, fullfile(plotDir,'1_1_spiral_trajectory.png'));
+\end{lstlisting}
+
+\subsection{Density Compensation via Voronoi (1.2)}
+The Voronoi tessellation assigns an area to each sample point. 186 samples at the boundary have NaN (unbounded cells). Some edge samples also have unreasonably large areas because their Voronoi cells extend far beyond the trajectory.
+\begin{figure}[H]\centering
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/1_2_raw_area.png}\caption{Raw.}\end{subfigure}\hfill
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/1_2_raw_area_zoomed.png}\caption{Zoomed.}\end{subfigure}
+\caption{Voronoi areas.}\end{figure}
+\begin{lstlisting}[style=matlab]
+area_raw = voronoidens(ktraj);
+nan_count = sum(isnan(area_raw(:)));
+fprintf('NaN count: %d\n', nan_count);
+figure; plot(area_raw(:)); xlabel('Sample index'); ylabel('Area');
+title('Raw Voronoi Area'); saveas(gcf, fullfile(plotDir,'1_2_raw_area.png'));
+valid = area_raw(~isnan(area_raw(:)) & area_raw(:)<1e-2);
+figure; plot(area_raw(:)); ylim([0 max(valid)*1.5]);
+xlabel('Sample index'); ylabel('Area'); title('Voronoi Area - Zoomed');
+saveas(gcf, fullfile(plotDir,'1_2_raw_area_zoomed.png'));
+\end{lstlisting}
+
+\subsection{Correcting the DCF (1.3)}
+I replaced NaN and outlier values with a threshold of $3\times\text{median}$ of finite values ($\approx 0.000222$). This prevents boundary artifacts while preserving the correct weighting for interior samples.
+\begin{figure}[H]\centering\includegraphics[width=0.5\textwidth]{results/plots/1_3_corrected_area.png}\caption{Corrected DCF.}\end{figure}
+\begin{lstlisting}[style=matlab]
+area_corr = area_raw;
+fin = area_raw(isfinite(area_raw(:)));
+thr = 3*median(fin);
+area_corr(isnan(area_corr)) = thr;
+area_corr(area_corr > thr)  = thr;
+fprintf('Threshold: %.6f, remaining NaN: %d\n', thr, sum(isnan(area_corr(:))));
+figure; plot(area_corr(:)); xlabel('Sample index'); ylabel('Area');
+title('Corrected Area'); saveas(gcf, fullfile(plotDir,'1_3_corrected_area.png'));
+\end{lstlisting}
+
+\subsection{Direct Summation Reference (1.4)}
+Implements the 2D NUFFT via direct summation: $m[n_x,n_y]=\sum_\ell d_\ell M(k_\ell) e^{j2\pi(k_{x,\ell}\Delta x(n_x-\tau)+k_{y,\ell}\Delta x(n_y-\tau))}$ with $N=128$, $\Delta x=1$, $\tau=64$. I loop row-by-row to keep memory low. This is the reference image for Part I. \textbf{CPU: 0.98 s.}
+\begin{figure}[H]\centering\includegraphics[width=0.55\textwidth]{results/plots/1_4_image.png}\caption{Reference image.}\end{figure}
+\begin{figure}[H]\centering
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/1_4_horiz.png}\caption{Horizontal.}\end{subfigure}\hfill
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/1_4_vert.png}\caption{Vertical.}\end{subfigure}
+\caption{Cross-sections.}\end{figure}
+\begin{lstlisting}[style=matlab]
+N=128; dx=1; tau=N/2;
+kx_vec=real(ktraj(:)); ky_vec=imag(ktraj(:));
+M_vec=kdata(:); d_vec=area_corr(:);
+dM = d_vec.*M_vec;
+n_vals = (0:N-1)-tau;
+phase_y = exp(1j*2*pi*dx * ky_vec * n_vals);
+ima_direct = zeros(N,N);
+t0 = cputime;
+for ix = 1:N
+    phase_x = exp(1j*2*pi*dx * kx_vec * n_vals(ix));
+    ima_direct(ix,:) = (dM.*phase_x).' * phase_y;
+end
+t_direct = cputime-t0; clear phase_y phase_x;
+ima_direct = normImg(ima_direct.');
+fprintf('1.4 CPU time: %.2f s\n', t_direct);
+figure; imshow(ima_direct,[0 1]); colormap gray; colorbar;
+title('Direct Summation 128x128'); saveas(gcf, fullfile(plotDir,'1_4_image.png'));
+figure; plot(abs(ima_direct(end/2,:))); xlabel('Column'); ylabel('Intensity');
+title('1.4 Horizontal Cross-Section'); grid on; saveas(gcf,fullfile(plotDir,'1_4_horiz.png'));
+figure; plot(abs(ima_direct(:,end/2))); xlabel('Row'); ylabel('Intensity');
+title('1.4 Vertical Cross-Section'); grid on; saveas(gcf,fullfile(plotDir,'1_4_vert.png'));
+save(fullfile(matDir,'ima_direct.mat'),'ima_direct');
+\end{lstlisting}
+
+\subsection{No Density Compensation (1.5)}
+Without DCF, low frequencies are overweighted because the spiral samples more densely near the k-space center. The image appears blurred and washed out. \textbf{PSNR=10.86 dB, SSIM=0.2729, CPU=0.95 s.} This confirms that density compensation is essential for non-Cartesian reconstruction.
+\begin{figure}[H]\centering
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/1_5_image.png}\caption{Image.}\end{subfigure}\hfill
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/1_5_error.png}\caption{Error.}\end{subfigure}
+\caption{1.5 No DCF.}\end{figure}
+\begin{figure}[H]\centering
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/1_5_horiz.png}\caption{Horiz XS.}\end{subfigure}\hfill
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/1_5_vert.png}\caption{Vert XS.}\end{subfigure}
+\caption{1.5 Cross-sections.}\end{figure}
+\begin{lstlisting}[style=matlab]
+n_vals = (0:N-1)-tau;
+phase_y = exp(1j*2*pi*dx * ky_vec * n_vals);
+ima_nodcf = zeros(N,N);
+t0 = cputime;
+for ix = 1:N
+    phase_x = exp(1j*2*pi*dx * kx_vec * n_vals(ix));
+    ima_nodcf(ix,:) = (M_vec.*phase_x).' * phase_y;
+end
+t_nodcf = cputime-t0; clear phase_y phase_x;
+ima_nodcf = normImg(ima_nodcf.');
+err_nodcf = abs(ima_nodcf - ima_direct);
+psnr_nodcf = psnr(ima_nodcf, ima_direct);
+ssim_nodcf = ssim(ima_nodcf, ima_direct);
+fprintf('1.5 No DCF: PSNR=%.2f dB, SSIM=%.4f, CPU=%.2f s\n',psnr_nodcf,ssim_nodcf,t_nodcf);
+figure; imshow(ima_nodcf,[0 1]); colormap gray; colorbar;
+title('1.5 No DCF Image'); saveas(gcf, fullfile(plotDir,'1_5_image.png'));
+figure; imshow(err_nodcf,[0 0.2]); colormap gray; colorbar;
+title('1.5 Error [0 0.2]'); saveas(gcf, fullfile(plotDir,'1_5_error.png'));
+figure; plot(abs(ima_nodcf(end/2,:)),'b'); hold on;
+plot(abs(ima_direct(end/2,:)),'r--'); legend('NoDCF','Ref');
+xlabel('Column'); title('1.5 Horizontal XS'); grid on; saveas(gcf,fullfile(plotDir,'1_5_horiz.png'));
+figure; plot(abs(ima_nodcf(:,end/2)),'b'); hold on;
+plot(abs(ima_direct(:,end/2)),'r--'); legend('NoDCF','Ref');
+xlabel('Row'); title('1.5 Vertical XS'); grid on; saveas(gcf,fullfile(plotDir,'1_5_vert.png'));
+\end{lstlisting}
+
+\subsection{Double FOV (1.6)}
+With $N=256$, $\Delta x=1$, FOV doubles. The object appears in the center with empty space around it. The cropped $128\times128$ center is identical to the reference (PSNR=$\infty$, SSIM=1.0000). No new information is gained but computation took 2.36 s vs 0.98 s. \textbf{CPU=2.36 s.}
+\begin{figure}[H]\centering
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/1_6_full.png}\caption{Full 256x256.}\end{subfigure}\hfill
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/1_6_crop.png}\caption{Cropped 128x128.}\end{subfigure}
+\caption{1.6 Double FOV.}\end{figure}
+\begin{figure}[H]\centering
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/1_6_error.png}\caption{Error.}\end{subfigure}\hfill
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/1_6_horiz.png}\caption{Horizontal XS.}\end{subfigure}
+\caption{1.6 Error and horizontal cross-section.}\end{figure}
+\begin{figure}[H]\centering
+\includegraphics[width=0.48\textwidth]{results/plots/1_6_vert.png}
+\caption{1.6 Vertical cross-section.}\end{figure}
+\begin{lstlisting}[style=matlab]
+N2=256; tau2=N2/2; n2=(0:N2-1)-tau2;
+phase_y2 = exp(1j*2*pi*dx * ky_vec * n2);
+ima_dfov = zeros(N2,N2);
+t0 = cputime;
+for ix = 1:N2
+    px = exp(1j*2*pi*dx * kx_vec * n2(ix));
+    ima_dfov(ix,:) = (dM.*px).' * phase_y2;
+end
+t_dfov = cputime-t0; clear phase_y2 px;
+ima_dfov = normImg(ima_dfov.');
+c=N2/2; h=N/2;
+ima_dfov_crop = normImg(ima_dfov(c-h+1:c+h, c-h+1:c+h));
+err_dfov = abs(ima_dfov_crop - ima_direct);
+psnr_dfov=psnr(ima_dfov_crop,ima_direct); ssim_dfov=ssim(ima_dfov_crop,ima_direct);
+fprintf('1.6: PSNR=%.2f, SSIM=%.4f, CPU=%.2f\n',psnr_dfov,ssim_dfov,t_dfov);
+figure; imshow(ima_dfov,[0 1]); colormap gray; colorbar;
+title('1.6 Full 256x256'); saveas(gcf, fullfile(plotDir,'1_6_full.png'));
+figure; imshow(ima_dfov_crop,[0 1]); colormap gray; colorbar;
+title('1.6 Cropped 128x128'); saveas(gcf, fullfile(plotDir,'1_6_crop.png'));
+figure; imshow(err_dfov,[0 0.2]); colormap gray; colorbar;
+title('1.6 Error'); saveas(gcf, fullfile(plotDir,'1_6_error.png'));
+figure; plot(abs(ima_dfov_crop(end/2,:)),'b'); hold on;
+plot(abs(ima_direct(end/2,:)),'r--'); legend('DblFOV','Ref');
+title('1.6 Horiz XS'); grid on; saveas(gcf, fullfile(plotDir,'1_6_horiz.png'));
+figure; plot(abs(ima_dfov_crop(:,end/2)),'b'); hold on;
+plot(abs(ima_direct(:,end/2)),'r--'); legend('DblFOV','Ref');
+title('1.6 Vert XS'); grid on; saveas(gcf, fullfile(plotDir,'1_6_vert.png'));
+\end{lstlisting}
+
+\subsection{Half Pixel Size (1.7)}
+With $\Delta x=0.5$, $N=256$, same FOV but finer pixels. Reference is zero-padded in k-space to $256\times256$ for fair comparison. The result is very close to the reference. \textbf{PSNR=33.67 dB, SSIM=0.9150, CPU=3.62 s.} Higher resolution image without new frequency content.
+\begin{figure}[H]\centering
+\begin{subfigure}{0.32\textwidth}\includegraphics[width=\textwidth]{results/plots/1_7_image.png}\caption{Image.}\end{subfigure}\hfill
+\begin{subfigure}{0.32\textwidth}\includegraphics[width=\textwidth]{results/plots/1_7_ref.png}\caption{Zero-padded ref.}\end{subfigure}\hfill
+\begin{subfigure}{0.32\textwidth}\includegraphics[width=\textwidth]{results/plots/1_7_error.png}\caption{Error.}\end{subfigure}
+\caption{1.7 Half pixel.}\end{figure}
+\begin{figure}[H]\centering
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/1_7_horiz.png}\caption{Horizontal XS.}\end{subfigure}\hfill
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/1_7_vert.png}\caption{Vertical XS.}\end{subfigure}
+\caption{1.7 Cross-sections.}\end{figure}
+\begin{lstlisting}[style=matlab]
+N3=256; dx3=0.5; tau3=N3/2; n3=(0:N3-1)-tau3;
+phase_y3 = exp(1j*2*pi*dx3 * ky_vec * n3);
+ima_hpx = zeros(N3,N3);
+t0=cputime;
+for ix=1:N3
+    px=exp(1j*2*pi*dx3*kx_vec*n3(ix));
+    ima_hpx(ix,:)=(dM.*px).'*phase_y3;
+end
+t_hpx=cputime-t0; clear phase_y3 px;
+ima_hpx = normImg(ima_hpx.');
+kref=fftshift(fft2(ifftshift(ima_direct)));
+pad=(N3-N)/2; kref_pad=zeros(N3,N3);
+kref_pad(pad+1:pad+N, pad+1:pad+N)=kref;
+ima_ref256=normImg(fftshift(ifft2(ifftshift(kref_pad))));
+err_hpx=abs(ima_hpx-ima_ref256);
+psnr_hpx=psnr(ima_hpx,ima_ref256); ssim_hpx=ssim(ima_hpx,ima_ref256);
+figure; imshow(ima_hpx,[0 1]); colormap gray; colorbar;
+title('1.7 Half Pixel'); saveas(gcf, fullfile(plotDir,'1_7_image.png'));
+figure; imshow(err_hpx,[0 0.2]); colormap gray; colorbar;
+title('1.7 Error'); saveas(gcf, fullfile(plotDir,'1_7_error.png'));
+\end{lstlisting}
+
+\subsection{Double Pixel Size (1.8)}
+With $\Delta x=2$, $N=64$, same FOV but coarser pixels. Result is zero-padded from $64\times64$ to $128\times128$ for comparison. Fine details are visibly lost. \textbf{PSNR=18.95 dB, SSIM=0.6160, CPU=0.36 s.} Faster but too much quality loss.
+\begin{figure}[H]\centering
+\begin{subfigure}{0.32\textwidth}\includegraphics[width=\textwidth]{results/plots/1_8_image.png}\caption{64x64.}\end{subfigure}\hfill
+\begin{subfigure}{0.32\textwidth}\includegraphics[width=\textwidth]{results/plots/1_8_zp.png}\caption{Zero-padded.}\end{subfigure}\hfill
+\begin{subfigure}{0.32\textwidth}\includegraphics[width=\textwidth]{results/plots/1_8_error.png}\caption{Error.}\end{subfigure}
+\caption{1.8 Double pixel.}\end{figure}
+\begin{figure}[H]\centering
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/1_8_horiz.png}\caption{Horizontal XS.}\end{subfigure}\hfill
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/1_8_vert.png}\caption{Vertical XS.}\end{subfigure}
+\caption{1.8 Cross-sections.}\end{figure}
+\begin{lstlisting}[style=matlab]
+N4=64; dx4=2; tau4=N4/2; n4=(0:N4-1)-tau4;
+phase_y4=exp(1j*2*pi*dx4*ky_vec*n4);
+ima_dpx=zeros(N4,N4);
+t0=cputime;
+for ix=1:N4
+    px=exp(1j*2*pi*dx4*kx_vec*n4(ix));
+    ima_dpx(ix,:)=(dM.*px).'*phase_y4;
+end
+t_dpx=cputime-t0; clear phase_y4 px;
+ima_dpx=normImg(ima_dpx.');
+kdpx=fftshift(fft2(ifftshift(ima_dpx)));
+pad2=(N-N4)/2; kdpx_pad=zeros(N,N);
+kdpx_pad(pad2+1:pad2+N4,pad2+1:pad2+N4)=kdpx;
+ima_dpx_zp=normImg(fftshift(ifft2(ifftshift(kdpx_pad))));
+err_dpx=abs(ima_dpx_zp-ima_direct);
+psnr_dpx=psnr(ima_dpx_zp,ima_direct); ssim_dpx=ssim(ima_dpx_zp,ima_direct);
+figure; imshow(ima_dpx,[0 1]); colormap gray; colorbar;
+title('1.8 Original 64x64'); saveas(gcf, fullfile(plotDir,'1_8_image.png'));
+figure; imshow(err_dpx,[0 0.2]); colormap gray; colorbar;
+title('1.8 Error'); saveas(gcf, fullfile(plotDir,'1_8_error.png'));
+\end{lstlisting}
+
+\subsection{1X Gridding (1.9)}
+Using \texttt{gridkb} with osf=1, wg=2. I transpose the gridding output to match the image-axis convention used by the direct-summation reference. The result is much closer to the reference than before, but some residual artifacts remain because the grid is not oversampled. \textbf{PSNR=23.91 dB, SSIM=0.7537, CPU=0.05 s.}
+\begin{figure}[H]\centering
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/1_9_image.png}\caption{Image.}\end{subfigure}\hfill
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/1_9_error.png}\caption{Error.}\end{subfigure}
+\caption{1.9 Gridding 1X.}\end{figure}
+\begin{figure}[H]\centering
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/1_9_horiz.png}\caption{Horizontal XS.}\end{subfigure}\hfill
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/1_9_vert.png}\caption{Vertical XS.}\end{subfigure}
+\caption{1.9 Cross-sections.}\end{figure}
+\begin{lstlisting}[style=matlab]
+t0=cputime;
+ima_g1=gridkb(kdata,ktraj,area_corr,128,1,2,'image');
+t_g1=cputime-t0;
+ima_g1=normImg(ima_g1.');
+err_g1=abs(ima_g1-ima_direct);
+psnr_g1=psnr(ima_g1,ima_direct); ssim_g1=ssim(ima_g1,ima_direct);
+figure; imshow(ima_g1,[0 1]); colormap gray; colorbar;
+title('1.9 Gridding 1X'); saveas(gcf, fullfile(plotDir,'1_9_image.png'));
+figure; imshow(err_g1,[0 0.2]); colormap gray; colorbar;
+title('1.9 Error'); saveas(gcf, fullfile(plotDir,'1_9_error.png'));
+figure; plot(abs(ima_g1(end/2,:)),'b'); hold on;
+plot(abs(ima_direct(end/2,:)),'r--'); legend('1XGrid','Ref');
+title('1.9 Horiz XS'); grid on; saveas(gcf, fullfile(plotDir,'1_9_horiz.png'));
+figure; plot(abs(ima_g1(:,end/2)),'b'); hold on;
+plot(abs(ima_direct(:,end/2)),'r--'); legend('1XGrid','Ref');
+title('1.9 Vert XS'); grid on; saveas(gcf, fullfile(plotDir,'1_9_vert.png'));
+\end{lstlisting}
+
+\subsection{2X Gridding (1.10)}
+With osf=2, wg=4. Grid is $256\times256$; I transpose the gridding output to match the reference orientation, then crop the central $128\times128$. The wider kernel and oversampling reduce aliasing strongly, and the result becomes nearly identical to the reference. \textbf{PSNR=44.35 dB, SSIM=0.9906, CPU=0.09 s.} This is a major improvement over 1X gridding.
+\begin{figure}[H]\centering
+\begin{subfigure}{0.32\textwidth}\includegraphics[width=\textwidth]{results/plots/1_10_full.png}\caption{Full 256x256.}\end{subfigure}\hfill
+\begin{subfigure}{0.32\textwidth}\includegraphics[width=\textwidth]{results/plots/1_10_crop.png}\caption{Cropped.}\end{subfigure}\hfill
+\begin{subfigure}{0.32\textwidth}\includegraphics[width=\textwidth]{results/plots/1_10_error.png}\caption{Error.}\end{subfigure}
+\caption{1.10 Gridding 2X.}\end{figure}
+\begin{figure}[H]\centering
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/1_10_horiz.png}\caption{Horizontal XS.}\end{subfigure}\hfill
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/1_10_vert.png}\caption{Vertical XS.}\end{subfigure}
+\caption{1.10 Cross-sections.}\end{figure}
+\begin{lstlisting}[style=matlab]
+t0=cputime;
+ima_g2_full=gridkb(kdata,ktraj,area_corr,128,2,4,'image');
+t_g2=cputime-t0;
+ima_g2_full=normImg(ima_g2_full.');
+c2=128; h2=64;
+ima_g2=normImg(ima_g2_full(c2-h2+1:c2+h2,c2-h2+1:c2+h2));
+err_g2=abs(ima_g2-ima_direct);
+psnr_g2=psnr(ima_g2,ima_direct); ssim_g2=ssim(ima_g2,ima_direct);
+figure; imshow(ima_g2_full,[0 1]); colormap gray; colorbar;
+title('1.10 Full 256x256'); saveas(gcf, fullfile(plotDir,'1_10_full.png'));
+figure; imshow(ima_g2,[0 1]); colormap gray; colorbar;
+title('1.10 Cropped 128x128'); saveas(gcf, fullfile(plotDir,'1_10_crop.png'));
+figure; imshow(err_g2,[0 0.2]); colormap gray; colorbar;
+title('1.10 Error'); saveas(gcf, fullfile(plotDir,'1_10_error.png'));
+figure; plot(abs(ima_g2(end/2,:)),'b'); hold on;
+plot(abs(ima_direct(end/2,:)),'r--'); legend('2XGrid','Ref');
+title('1.10 Horiz XS'); grid on; saveas(gcf, fullfile(plotDir,'1_10_horiz.png'));
+figure; plot(abs(ima_g2(:,end/2)),'b'); hold on;
+plot(abs(ima_direct(:,end/2)),'r--'); legend('2XGrid','Ref');
+title('1.10 Vert XS'); grid on; saveas(gcf, fullfile(plotDir,'1_10_vert.png'));
+\end{lstlisting}
+
+\subsection{Scattered Interpolation 1X (1.11)}
+Using \texttt{scatteredInterpolant} with linear interpolation on a $128\times128$ grid from $\pm0.5$. NaN values (outside the spiral ROS) are set to zero. This uses only nearby data points (unlike gridding which convolves with all). The image may be flipped/transposed; I corrected the orientation before comparison. \textbf{PSNR=22.85 dB, SSIM=0.6705, CPU=0.06 s.} It gives a reasonable reconstruction, but after fixing the gridding orientation it is now worse than both 1X and especially 2X gridding for this dataset.
+\begin{figure}[H]\centering
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/1_11_image.png}\caption{Image.}\end{subfigure}\hfill
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/1_11_error.png}\caption{Error.}\end{subfigure}
+\caption{1.11 ScatInterp 1X.}\end{figure}
+\begin{figure}[H]\centering
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/1_11_horiz.png}\caption{Horizontal XS.}\end{subfigure}\hfill
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/1_11_vert.png}\caption{Vertical XS.}\end{subfigure}
+\caption{1.11 Cross-sections.}\end{figure}
+\begin{lstlisting}[style=matlab]
+kx_s=real(ktraj(:)); ky_s=imag(ktraj(:));
+F_re = scatteredInterpolant(kx_s,ky_s,real(kdata(:)),'linear','none');
+F_im = scatteredInterpolant(kx_s,ky_s,imag(kdata(:)),'linear','none');
+kg1d = linspace(-0.5,0.5,128);
+[KX1,KY1] = meshgrid(kg1d,kg1d);
+t0=cputime;
+kgrid1 = F_re(KX1,KY1) + 1j*F_im(KX1,KY1);
+t_s1=cputime-t0;
+kgrid1(isnan(kgrid1))=0;
+ima_s1 = fftshift(ifft2(ifftshift(kgrid1)));
+ima_s1 = normImg(ima_s1);
+candidates = {ima_s1, fliplr(ima_s1), flipud(ima_s1), ima_s1.', ...
+              flipud(fliplr(ima_s1)), rot90(ima_s1,1), rot90(ima_s1,3)};
+best_p=-Inf;
+for ci=1:numel(candidates)
+    if all(size(candidates{ci})==[N N])
+        pp=psnr(candidates{ci},ima_direct);
+        if pp>best_p, best_p=pp; ima_s1=candidates{ci}; end
+    end
+end
+err_s1=abs(ima_s1-ima_direct);
+psnr_s1=psnr(ima_s1,ima_direct); ssim_s1=ssim(ima_s1,ima_direct);
+figure; imshow(ima_s1,[0 1]); colormap gray; colorbar;
+title('1.11 ScatInterp 1X'); saveas(gcf, fullfile(plotDir,'1_11_image.png'));
+figure; imshow(err_s1,[0 0.2]); colormap gray; colorbar;
+title('1.11 Error'); saveas(gcf, fullfile(plotDir,'1_11_error.png'));
+\end{lstlisting}
+
+\subsection{Scattered Interpolation 2X (1.12)}
+Same as 1.11 but with a $256\times256$ grid. Cropped central $128\times128$. The finer grid improves interpolation. \textbf{PSNR=24.33 dB, SSIM=0.7350, CPU=0.27 s.} It improves over 1X scattered interpolation, but it still remains below the oriented 2X gridding result for this dataset.
+\begin{figure}[H]\centering
+\begin{subfigure}{0.32\textwidth}\includegraphics[width=\textwidth]{results/plots/1_12_full.png}\caption{Full 256x256.}\end{subfigure}\hfill
+\begin{subfigure}{0.32\textwidth}\includegraphics[width=\textwidth]{results/plots/1_12_crop.png}\caption{Cropped.}\end{subfigure}\hfill
+\begin{subfigure}{0.32\textwidth}\includegraphics[width=\textwidth]{results/plots/1_12_error.png}\caption{Error.}\end{subfigure}
+\caption{1.12 ScatInterp 2X.}\end{figure}
+\begin{figure}[H]\centering
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/1_12_horiz.png}\caption{Horizontal XS.}\end{subfigure}\hfill
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\textwidth]{results/plots/1_12_vert.png}\caption{Vertical XS.}\end{subfigure}
+\caption{1.12 Cross-sections.}\end{figure}
+\begin{lstlisting}[style=matlab]
+kg2d = linspace(-0.5,0.5,256);
+[KX2,KY2] = meshgrid(kg2d,kg2d);
+t0=cputime;
+kgrid2 = F_re(KX2,KY2) + 1j*F_im(KX2,KY2);
+t_s2=cputime-t0;
+kgrid2(isnan(kgrid2))=0;
+ima_s2_full = fftshift(ifft2(ifftshift(kgrid2)));
+ima_s2_full = normImg(ima_s2_full);
+candidates2 = {ima_s2_full, fliplr(ima_s2_full), flipud(ima_s2_full), ...
+    ima_s2_full.', flipud(fliplr(ima_s2_full)), rot90(ima_s2_full,1), rot90(ima_s2_full,3)};
+best_p=-Inf;
+for ci=1:numel(candidates2)
+    tmp = candidates2{ci};
+    if all(size(tmp)==[256 256])
+        c3=128; crop=normImg(tmp(c3-h2+1:c3+h2,c3-h2+1:c3+h2));
+        pp=psnr(crop,ima_direct);
+        if pp>best_p, best_p=pp; ima_s2_full=tmp; ima_s2=crop; end
+    end
+end
+err_s2=abs(ima_s2-ima_direct);
+psnr_s2=psnr(ima_s2,ima_direct); ssim_s2=ssim(ima_s2,ima_direct);
+figure; imshow(ima_s2_full,[0 1]); colormap gray; colorbar;
+title('1.12 Full 256x256'); saveas(gcf, fullfile(plotDir,'1_12_full.png'));
+figure; imshow(ima_s2,[0 1]); colormap gray; colorbar;
+title('1.12 Cropped'); saveas(gcf, fullfile(plotDir,'1_12_crop.png'));
+figure; imshow(err_s2,[0 0.2]); colormap gray; colorbar;
+title('1.12 Error'); saveas(gcf, fullfile(plotDir,'1_12_error.png'));
+\end{lstlisting}
+
+\input{HW2_report_part2.tex}
+
+\end{document}

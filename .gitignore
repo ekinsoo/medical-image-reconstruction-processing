@@ -1,0 +1,33 @@
+# Python and notebooks
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.venv/
+venv/
+
+# MATLAB generated files and large data
+*.mat
+*.h5
+*.mex*
+*.asv
+
+# Generated outputs
+outputs/
+results/
+figures/
+preview/
+layout/
+slides/
+assets/
+
+# Archives and local documents
+*.zip
+*.rar
+*.7z
+*.docx
+
+# Dependencies and OS/editor files
+node_modules/
+__MACOSX/
+.DS_Store
+Thumbs.db

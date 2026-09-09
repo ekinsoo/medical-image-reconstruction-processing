@@ -1,0 +1,1726 @@
+% =========================================================================
+%  EEE 475/575 – Homework #3 Report
+%  Student : Özgür Ekin Sönmez   |   ID: 22201966
+% =========================================================================
+\documentclass[12pt,a4paper]{article}
+
+% ---------- Packages ----------
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{graphicx}
+\usepackage{amsmath, amssymb}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{float}
+\usepackage{parskip}
+\usepackage{titlesec}
+\usepackage{enumitem}
+
+% ---------- Code listing style ----------
+\lstdefinestyle{matlabstyle}{
+    language=Matlab,
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{blue}\bfseries,
+    commentstyle=\color{green!60!black},
+    stringstyle=\color{orange},
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    numbersep=8pt,
+    breaklines=true,
+    frame=single,
+    backgroundcolor=\color{gray!8},
+    tabsize=4,
+    showstringspaces=false
+}
+\lstset{style=matlabstyle}
+
+% ---------- No header/footer except page number ----------
+\pagestyle{plain}
+
+% ---------- Title ----------
+\title{
+    \textbf{EEE 475/575 Medical Image Reconstruction \& Processing}\\[0.4em]
+    \Large Homework \#3 Report
+}
+\author{
+    Özgür Ekin Sönmez \\
+    ID: 22201966
+}
+\date{15 April 2026}
+
+% ==========================================================================
+\begin{document}
+\maketitle
+
+% ==========================================================================
+\section*{GenAI Usage Disclosure}
+\addcontentsline{toc}{section}{GenAI Usage Disclosure}
+
+This homework was completed with the assistance of Antigravity (Claude Opus 4.6 Thinking) by Google DeepMind/Anthropic. The tool was used to generate the MATLAB code structure and cell organization for all parts, especially creating plotting functions. 
+Help to organize this report, including the mathematical derivations (Latex) in Part~2.5.
+
+All submitted code and written content have been reviewed, understood, and verified by the student. The student is fully responsible for correctness and can explain and justify all results.
+
+\newpage
+
+% ==========================================================================
+% ==========================================================================
+%                          PART I – SYSTEM MATRIX
+% ==========================================================================
+% ==========================================================================
+\section{Part I -- System Matrix}
+
+% --------------------------------------------------------------------------
+\subsection{Part 1.1 -- Viewing Calibration Data}
+
+The file \texttt{SM\_25nm\_50x50.mat} is loaded. It contains the variable \texttt{SM} of size $2\times 1632\times 2500$: two receive coils, 1632 frequency bins (full spectrum), and 2500 spatial grid positions ($50\times50$). The magnitude spectrum is plotted for three grid locations (positions 5, 500, and 1500) for each coil.
+
+Because a non-centered Fourier transform was used, the first bin corresponds to DC. The spectrum is sparse: signal appears only at certain discrete frequencies, which are the higher harmonics of the drive field frequencies used to induce the nanoparticle signal in MPI.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.92\textwidth]{figures/fig_1_1_coil1.png}
+    \caption{Magnitude spectra from Coil~1 at three different grid locations (5, 500, 1500).}
+    \label{fig:1_1_coil1}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.92\textwidth]{figures/fig_1_1_coil2.png}
+    \caption{Magnitude spectra from Coil~2 at the same three grid locations.}
+    \label{fig:1_1_coil2}
+\end{figure}
+
+\subsubsection*{Code}
+\begin{lstlisting}
+load('SM_25nm_50x50.mat');
+
+locs = [5, 500, 1500];
+figure;
+for i = 1:3
+    subplot(3,1,i);
+    plot(abs(SM(1,:,locs(i))), 'LineWidth', 1);
+    xlabel('Frequency Index');
+    ylabel('|SM|');
+    title(['Coil 1 - Grid Location ' num2str(locs(i))]);
+    grid on;
+end
+
+
+figure;
+for i = 1:3
+    subplot(3,1,i);
+    plot(abs(SM(2,:,locs(i))), 'LineWidth', 1);
+    xlabel('Frequency Index');
+    ylabel('|SM|');
+    title(['Coil 2 - Grid Location ' num2str(locs(i))]);
+    grid on;
+end
+\end{lstlisting}
+
+% --------------------------------------------------------------------------
+\subsection{Part 1.2 -- Preparing the System Matrix}
+
+The system matrix $S$ is formed from \texttt{SM} in three steps:
+
+\begin{enumerate}
+    \item \textbf{Discard the redundant half}: Since the time-domain calibration signal is real-valued, its spectrum has conjugate symmetry. Only the first half contains independent information:
+    \[
+        S \leftarrow \texttt{SM}(:,\,1:\text{end}/2,\,:) \quad \Rightarrow \text{size: } 2\times 816\times 2500
+    \]
+
+    \item \textbf{Concatenate coils along the frequency axis}:
+    \[
+        S = \texttt{reshape}(S,\;2\times816,\;2500) \quad \Rightarrow \text{size: } 1632\times 2500
+    \]
+
+    \item \textbf{Separate real and imaginary parts}: Since the MPI image (nanoparticle concentration) is real-valued, we work with a fully real system matrix:
+    \[
+        S = \begin{bmatrix} \mathrm{Re}(S) \\ \mathrm{Im}(S) \end{bmatrix} \quad \Rightarrow \text{size: } 3264\times 2500
+    \]
+\end{enumerate}
+
+Three columns of $S$ are shown below. Each column is the calibration fingerprint of a single grid position.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.92\textwidth]{figures/fig_1_2_S_columns.png}
+    \caption{Three columns of the system matrix $S$ (grid positions 5, 500, 1500).}
+    \label{fig:1_2_cols}
+\end{figure}
+
+$S$ is saved to \texttt{S.mat}. The file size is \textbf{63.07~MB}.
+
+\subsubsection*{Code}
+\begin{lstlisting}
+S = SM(:, 1:end/2, :);         % spektrumun ikinci yarisini at
+S = reshape(S, 2*816, 2500);   % iki coili birlestir
+S = [real(S); imag(S)];        % reel ve imajiner parcalari birlestir -> 3264x2500
+
+fprintf('Size of S: %d x %d\n', size(S,1), size(S,2));
+
+
+figure;
+for i = 1:3
+    subplot(3,1,i);
+    plot(S(:, locs(i)), 'LineWidth', 1);
+    xlabel('Row Index');
+    ylabel('Value');
+    title(['Column ' num2str(locs(i)) ' of S']);
+    grid on;
+end
+
+save('S.mat', 'S');
+info_S = dir('S.mat');
+fprintf('Size of S.mat: %.2f MB\n', info_S.bytes / 1e6);
+\end{lstlisting}
+
+% --------------------------------------------------------------------------
+\subsection{Part 1.3 -- Preparing the Measurement Vector}
+
+The file \texttt{meas\_25nm\_phantom.mat} is loaded. It contains:
+\begin{itemize}
+    \item \texttt{phantom\_ref}: the $50\times50$ reference image showing nanoparticle concentration.
+    \item \texttt{meas}: the $2\times1632$ frequency-domain measurement.
+\end{itemize}
+
+The reference phantom is displayed below. \texttt{max\_val} is defined as the maximum pixel intensity in \texttt{phantom\_ref} and is used throughout the rest of the homework.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.45\textwidth]{figures/fig_1_3_phantom.png}
+    \caption{Reference phantom $m_\mathrm{ref}$ ($50\times50$).}
+    \label{fig:1_3_phantom}
+\end{figure}
+
+The measurement vector $u$ is prepared using the same three steps as $S$:
+\[
+    u \;\leftarrow\; \texttt{meas}(:,1:\text{end}/2), \quad
+    u \;\leftarrow\; \texttt{reshape}(u, 1632, 1), \quad
+    u \;\leftarrow\; \begin{bmatrix}\mathrm{Re}(u)\\\mathrm{Im}(u)\end{bmatrix}
+    \quad \Rightarrow \text{size: } 3264\times 1
+\]
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{figures/fig_1_3_u.png}
+    \caption{Measurement vector $u$ (size $3264\times1$).}
+    \label{fig:1_3_u}
+\end{figure}
+
+$u$ is saved to \texttt{u.mat}. The file size is \textbf{25.17~KB}, much smaller than \texttt{S.mat} since it is a single vector.
+
+\subsubsection*{Code}
+\begin{lstlisting}
+load('meas_25nm_phantom.mat');
+
+
+figure;
+imagesc(phantom_ref);
+colormap(gray);
+axis image;
+colorbar;
+title('Reference Phantom m_{ref}');
+xlabel('x'); ylabel('y');
+
+max_val = max(phantom_ref(:));
+fprintf('max_val = %.4f\n', max_val);
+
+% u icin de S ile ayni adimlar
+u = meas(:, 1:end/2);
+u = reshape(u, 2*816, 1);
+u = [real(u); imag(u)];       % 3264x1
+
+fprintf('Size of u: %d x %d\n', size(u,1), size(u,2));
+
+
+figure;
+plot(u, 'LineWidth', 1);
+xlabel('Index');
+ylabel('u');
+title('Measurement Vector u');
+grid on;
+
+save('u.mat', 'u');
+info_u = dir('u.mat');
+fprintf('Size of u.mat: %.2f KB\n', info_u.bytes / 1e3);
+
+ref_norm = double(phantom_ref) / max_val;
+\end{lstlisting}
+
+\newpage
+% ==========================================================================
+% ==========================================================================
+%                          PART II -- SVD
+% ==========================================================================
+% ==========================================================================
+\section{Part II -- Singular Value Decomposition}
+
+% --------------------------------------------------------------------------
+\subsection{Part 2.1 -- SVD of the System Matrix}
+
+The compact (economy) SVD of $S$ is computed:
+\[
+    S = U\,\Sigma\,V^T
+\]
+where $U \in \mathbb{R}^{3264\times2500}$, $\Sigma \in \mathbb{R}^{2500\times2500}$ (diagonal), and $V \in \mathbb{R}^{2500\times2500}$.
+
+The singular values span many orders of magnitude as shown in the figures below. Both a full view and a zoomed-in view of the first 200 singular values are provided.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.80\textwidth]{figures/fig_2_1_singular_values.png}
+    \caption{Singular values of $S$ (log scale). They span several orders of magnitude, resulting in a very large condition number.}
+    \label{fig:2_1_sv}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.80\textwidth]{figures/fig_2_1_singular_values_zoomed.png}
+    \caption{Zoomed-in view of the first 200 singular values.}
+    \label{fig:2_1_sv_zoom}
+\end{figure}
+
+The condition number is:
+\[
+    \mathrm{Cond}(S) = \frac{\sigma_1}{\sigma_{2500}}
+\]
+The computed condition number is $\mathrm{Cond}(S) = 6.80 \times 10^{16}$, which is verified using MATLAB's built-in \texttt{cond} function ($7.47 \times 10^{17}$; the small difference is due to numerical precision). This very large condition number indicates that $S$ is severely ill-conditioned: small singular values amplify noise when the system is inverted.
+
+\subsubsection*{Code}
+\begin{lstlisting}
+fprintf('\nComputing compact SVD of S...\n');
+[U, Sigma, V] = svd(S, 'econ');
+sigma_vals = diag(Sigma);
+
+
+figure;
+semilogy(sigma_vals, 'LineWidth', 1.5);
+xlabel('Index');
+ylabel('Singular value');
+title('Part 2.1 - Singular values of S');
+grid on;
+
+% Yakinlastirilmis: ilk 200 SV
+figure;
+semilogy(1:200, sigma_vals(1:200), 'LineWidth', 1.5);
+xlabel('Index');
+ylabel('Singular value');
+title('Part 2.1 - Singular values of S (zoomed, first 200)');
+grid on;
+
+
+cond_svd = sigma_vals(1) / sigma_vals(end);
+fprintf('Condition number (SVD):   %.4e\n', cond_svd);
+fprintf('Condition number (cond): %.4e\n', cond(S));
+\end{lstlisting}
+
+% --------------------------------------------------------------------------
+\subsection{Part 2.2 -- Full SVD (Moore-Penrose Pseudo-inverse)}
+
+The image $c$ is reconstructed using the Moore-Penrose pseudo-inverse:
+\[
+    c = V\,\Sigma^{-1}\,U^T\,u
+\]
+After reshaping $c$ to $50\times50$ and setting negative values to zero, the image is displayed.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_2_2_full_svd.png}
+    \caption{Full SVD reconstruction. Left: reconstructed image. Center: reference $m_\mathrm{ref}$. Right: error image. Grayscale windows: $[0,\, \mathrm{max\_val}]$ for images, $[0,\, 0.5\cdot\mathrm{max\_val}]$ for error.}
+    \label{fig:2_2_full}
+\end{figure}
+
+\textbf{Comments:} The full pseudoinverse amplifies the small singular values, causing strong noise in the reconstructed image. Even in this noiseless simulation, round-off errors are amplified and result in visible artifacts. The resulting PSNR is $-119.50$~dB and SSIM is $0.0333$, both extremely poor. This demonstrates the need for regularization in ill-conditioned inverse problems.
+
+\subsubsection*{Code}
+\begin{lstlisting}
+% c = V * Sigma^{-1} * U' * u
+c_full = V * (diag(1./sigma_vals) * (U' * u));
+ima_full = reshape(c_full, 50, 50);
+ima_full(ima_full < 0) = 0;           % nanoparticle concentration >= 0
+
+ima_full_norm = double(ima_full) / max_val;
+psnr_22 = psnr(ima_full_norm, ref_norm);
+ssim_22 = ssim(ima_full_norm, ref_norm);
+fprintf('\nPart 2.2 - Full SVD: PSNR = %.2f dB, SSIM = %.4f\n', psnr_22, ssim_22);
+
+error_22 = abs(ima_full - phantom_ref);
+
+figure; colormap(gray);
+subplot(1,3,1); imshow(ima_full,  [0 max_val]);      colorbar;
+                title('Full SVD Image');              axis on;
+subplot(1,3,2); imshow(phantom_ref, [0 max_val]);    colorbar;
+                title('Reference m_{ref}');           axis on;
+subplot(1,3,3); imshow(error_22, [0 0.5*max_val]);  colorbar;
+                title('Error Image');                 axis on;
+\end{lstlisting}
+
+% --------------------------------------------------------------------------
+\subsection{Part 2.3 -- Truncated SVD (Condition Number $\approx 100$)}
+
+Singular values are truncated so that the condition number is approximately 100. The number of retained singular values $M$ satisfies:
+\[
+    \frac{\sigma_1}{\sigma_M} \approx 100
+    \quad\Rightarrow\quad
+    M = \max\!\left\{i : \frac{\sigma_i}{\sigma_1} \geq \frac{1}{100}\right\}
+\]
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_2_3_tsvd.png}
+    \caption{Truncated SVD reconstruction with condition number $\approx 100$.}
+    \label{fig:2_3_tsvd}
+\end{figure}
+
+\textbf{Comments:} With $M = 143$ singular values kept (actual condition number $= 98.82$), the PSNR improves to $19.77$~dB and SSIM to $0.4219$. The image quality improves dramatically compared to the full pseudoinverse. By discarding the singular vectors associated with small singular values, the noise amplification is eliminated.
+
+\subsubsection*{Code}
+\begin{lstlisting}
+target_cond_23 = 100;
+M23 = sum(sigma_vals / sigma_vals(1) >= 1/target_cond_23);
+fprintf('\nPart 2.3: M = %d singular values kept ', M23);
+fprintf('(actual cond = %.2f)\n', sigma_vals(1)/sigma_vals(M23));
+
+c_23 = V(:,1:M23) * (diag(1./sigma_vals(1:M23)) * (U(:,1:M23)' * u));
+ima_23 = reshape(c_23, 50, 50);
+ima_23(ima_23 < 0) = 0;
+
+ima_23_norm = double(ima_23) / max_val;
+psnr_23 = psnr(ima_23_norm, ref_norm);
+ssim_23 = ssim(ima_23_norm, ref_norm);
+fprintf('Part 2.3 - TSVD (cond~100): PSNR = %.2f dB, SSIM = %.4f\n', psnr_23, ssim_23);
+
+error_23 = abs(ima_23 - phantom_ref);
+
+figure; colormap(gray);
+subplot(1,3,1); imshow(ima_23,    [0 max_val]);      colorbar;
+                title(sprintf('TSVD (cond~100, M=%d)',M23)); axis on;
+subplot(1,3,2); imshow(phantom_ref, [0 max_val]);    colorbar;
+                title('Reference m_{ref}');           axis on;
+subplot(1,3,3); imshow(error_23, [0 0.5*max_val]);  colorbar;
+                title('Error Image');                 axis on;
+\end{lstlisting}
+
+% --------------------------------------------------------------------------
+\subsection{Part 2.4 -- Effect of Condition Number on Image Quality}
+
+The experiment in Part~2.3 is repeated for condition numbers
+$\{1,\;5,\;10,\;10^2,\;10^3,\;10^4,\;10^5,\;10^6,\;10^7\}$.
+For each value, the image and error image are computed and PSNR/SSIM are recorded.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.80\textwidth]{figures/fig_2_4_psnr_ssim.png}
+    \caption{PSNR (top) and SSIM (bottom) as functions of the condition number (log scale).}
+    \label{fig:2_4_metrics}
+\end{figure}
+
+Reconstructed images and error images for each condition number:
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_2_4_cond_1.png}
+    \caption{Truncated SVD: Cond = 1.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_2_4_cond_5.png}
+    \caption{Truncated SVD: Cond = 5.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_2_4_cond_10.png}
+    \caption{Truncated SVD: Cond = 10.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_2_4_cond_100.png}
+    \caption{Truncated SVD: Cond = $10^2$.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_2_4_cond_1000.png}
+    \caption{Truncated SVD: Cond = $10^3$.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_2_4_cond_10000.png}
+    \caption{Truncated SVD: Cond = $10^4$.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_2_4_cond_100000.png}
+    \caption{Truncated SVD: Cond = $10^5$.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_2_4_cond_1e+06.png}
+    \caption{Truncated SVD: Cond = $10^6$.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_2_4_cond_1e+07.png}
+    \caption{Truncated SVD: Cond = $10^7$.}
+    \label{fig:2_4_images}
+\end{figure}
+
+\textbf{Comments:}
+\begin{itemize}
+    \item \textbf{Very small condition number} (e.g., cond = 1 or 5): Only a few singular values are kept ($M=1$ or $M=8$). The image is overly smooth and blurry (high bias, loss of detail). PSNR values are around 11--12~dB.
+    \item \textbf{Intermediate condition number}: Both PSNR and SSIM increase with condition number up to a peak. At $\mathrm{cond} = 10^6$ ($M = 1370$), we get the best PSNR of $31.12$~dB and SSIM of $0.8859$.
+    \item \textbf{Very large condition number} (e.g., $10^7$): PSNR slightly decreases to $30.18$~dB. More small singular values are retained and they begin to amplify numerical errors.
+    \item The \textbf{optimal condition number} among the tested values is $\mathbf{10^6}$ (PSNR $= 31.12$~dB, SSIM $= 0.8859$).
+\end{itemize}
+
+\subsubsection*{Code}
+\begin{lstlisting}
+cond_list = [1, 5, 10, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7];
+N_cond    = length(cond_list);
+psnr_cond = zeros(1, N_cond);
+ssim_cond = zeros(1, N_cond);
+M_cond    = zeros(1, N_cond);
+
+for k = 1:N_cond
+    tgt  = cond_list(k);
+    Mk   = sum(sigma_vals / sigma_vals(1) >= 1/tgt);
+    if Mk < 1; Mk = 1; end
+    M_cond(k) = Mk;
+
+    c_k   = V(:,1:Mk) * (diag(1./sigma_vals(1:Mk)) * (U(:,1:Mk)' * u));
+    ima_k = reshape(c_k, 50, 50);
+    ima_k(ima_k < 0) = 0;
+
+    ima_k_norm    = double(ima_k) / max_val;
+    psnr_cond(k)  = psnr(ima_k_norm, ref_norm);
+    ssim_cond(k)  = ssim(ima_k_norm, ref_norm);
+
+    err_k = abs(ima_k - phantom_ref);
+
+    figure; colormap(gray);
+    subplot(1,3,1); imshow(ima_k, [0 max_val]);         colorbar;
+                    title(sprintf('TSVD cond=%g, M=%d', tgt, Mk)); axis on;
+    subplot(1,3,2); imshow(phantom_ref, [0 max_val]);   colorbar;
+                    title('Reference m_{ref}');          axis on;
+    subplot(1,3,3); imshow(err_k, [0 0.5*max_val]);    colorbar;
+                    title('Error Image');                axis on;
+end
+
+% --- PSNR and SSIM vs condition number ---
+figure;
+subplot(2,1,1);
+semilogx(cond_list, psnr_cond, 'b-o', 'LineWidth', 2, 'MarkerFaceColor','b');
+xlabel('Condition Number'); ylabel('PSNR (dB)');
+title('PSNR vs Condition Number'); grid on;
+
+subplot(2,1,2);
+semilogx(cond_list, ssim_cond, 'r-o', 'LineWidth', 2, 'MarkerFaceColor','r');
+xlabel('Condition Number'); ylabel('SSIM');
+title('SSIM vs Condition Number'); grid on;
+
+[~, best_idx_24] = max(psnr_cond);
+fprintf('\nBest condition number (by PSNR): %g\n', cond_list(best_idx_24));
+\end{lstlisting}
+
+% --------------------------------------------------------------------------
+\subsection{Part 2.5 -- Filtered SVD: Equivalence to Tikhonov Regularization}
+
+We want to show that filtered SVD (with filtered singular values $\tilde{\sigma}_i = \frac{\sigma_i^2+\lambda}{\sigma_i}$) is equivalent to solving the Tikhonov regularized least-squares problem:
+\[
+    (S^T S + \lambda I)\,c = S^T u
+\]
+
+\textbf{Proof:} Substitute $S = U\Sigma V^T$ (compact SVD):
+\begin{align}
+    S^T S &= (U\Sigma V^T)^T (U\Sigma V^T) = V\Sigma U^T \cdot U\Sigma V^T = V\Sigma^2 V^T
+\end{align}
+(using $U^T U = I_{2500}$ from the economy SVD). Since $V$ is square and orthogonal, $VV^T = I$, so $\lambda I = \lambda V V^T$. Therefore:
+\begin{align}
+    S^T S + \lambda I = V\Sigma^2 V^T + \lambda V V^T = V\!\left(\Sigma^2 + \lambda I\right)\!V^T
+\end{align}
+Also, $S^T u = V\Sigma U^T u$. The system becomes:
+\begin{align}
+    V\!\left(\Sigma^2 + \lambda I\right)\!V^T\,c &= V\Sigma U^T u
+\end{align}
+Multiplying both sides by $V^T$ from the left and using $V^T V = I$:
+\begin{align}
+    \left(\Sigma^2 + \lambda I\right) V^T c &= \Sigma U^T u
+\end{align}
+Let $x = V^T c$. Since $(\Sigma^2 + \lambda I)$ is diagonal and invertible:
+\begin{align}
+    x &= (\Sigma^2 + \lambda I)^{-1}\,\Sigma\,U^T u
+\end{align}
+Therefore $c = Vx$:
+\begin{align}
+    \boxed{c = V\,\tilde{\Sigma}^{-1}\,U^T\,u}
+\end{align}
+where $\tilde{\Sigma}$ is a diagonal matrix whose $i$-th entry (filtered singular value) is:
+\[
+    \tilde{\sigma}_i = \frac{\sigma_i^2 + \lambda}{\sigma_i}
+    = \sigma_i + \frac{\lambda}{\sigma_i}
+    = \sigma_i\!\left(1 + \frac{\lambda}{\sigma_i^2}\right)
+\]
+This is exactly the filtered singular value defined in the problem statement. \hfill$\square$
+
+Note that the filter factor is:
+\[
+    y_i = \frac{\tilde{\sigma}_i^{-1}}{\sigma_i^{-1}} = \frac{\sigma_i^2}{\sigma_i^2 + \lambda}
+\]
+which approaches 1 for large $\sigma_i$ (large singular values are not affected) and approaches 0 for small $\sigma_i$ when $\lambda \gg \sigma_i^2$ (small singular values are damped).
+
+% --------------------------------------------------------------------------
+\subsection{Part 2.6 -- Filtered SVD with $\lambda = \sigma_1 \sigma_N$}
+
+As a starting point, $\lambda = \sigma_1 \cdot \sigma_{2500}$ (product of the largest and smallest singular values) is chosen. This value sits geometrically between the extremes of the singular value spectrum.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.80\textwidth]{figures/fig_2_6_filtered_sv.png}
+    \caption{Original singular values $\sigma_i$ vs.\ filtered singular values $\tilde{\sigma}_i$ with $\lambda = \sigma_1\sigma_N$ (log scale). The filtering increases small singular values while leaving large ones almost unchanged.}
+    \label{fig:2_6_sv}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.80\textwidth]{figures/fig_2_6_filtered_sv_zoomed.png}
+    \caption{Zoomed-in view of original vs.\ filtered singular values in the transition region where the filtering effect becomes significant.}
+    \label{fig:2_6_sv_zoom}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_2_6_image.png}
+    \caption{Filtered SVD reconstruction with $\lambda = \sigma_1\sigma_N$.}
+    \label{fig:2_6_image}
+\end{figure}
+
+\textbf{Comments:} With $\lambda = \sigma_1\sigma_N = 4.15 \times 10^5$, the PSNR is $19.98$~dB and SSIM is $0.5947$. The filtered SVD gives a much cleaner image than the full pseudoinverse because small singular values are damped. However, this $\lambda$ value is relatively small (close to the smallest singular values squared), so the filtering is not aggressive enough. We search for a better $\lambda^*$ in Part~2.7.
+
+\subsubsection*{Code}
+\begin{lstlisting}
+lambda_26 = sigma_vals(1) * sigma_vals(end);
+fprintf('\nPart 2.6: lambda = sigma_1 * sigma_N = %.4e\n', lambda_26);
+
+% Filtrelenmis tekil degerler
+sigma_filt_26 = (sigma_vals.^2 + lambda_26) ./ sigma_vals;
+
+
+figure;
+semilogy(sigma_vals,     'b-',  'LineWidth', 1.5); hold on;
+semilogy(sigma_filt_26,  'r-',  'LineWidth', 1.5);
+legend('Original singular values', 'Filtered singular values', 'Location','best');
+xlabel('Index'); ylabel('Singular value');
+title('Part 2.6 - Original and filtered singular values');
+grid on;
+
+% Yakinlastirilmis: son 800 SV (gecis bolgesi)
+zoom_start = max(1, length(sigma_vals) - 799);
+figure;
+semilogy(zoom_start:length(sigma_vals), sigma_vals(zoom_start:end), 'b-', 'LineWidth', 1.5); hold on;
+semilogy(zoom_start:length(sigma_vals), sigma_filt_26(zoom_start:end), 'r-', 'LineWidth', 1.5);
+legend('Original singular values', 'Filtered singular values', 'Location','best');
+xlabel('Index'); ylabel('Singular value');
+title('Part 2.6 - Original vs Filtered SV (zoomed, transition region)');
+grid on;
+
+% Goruntu olusturma
+c_26   = V * (diag(1./sigma_filt_26) * (U' * u));
+ima_26 = reshape(c_26, 50, 50);
+ima_26(ima_26 < 0) = 0;
+
+ima_26_norm = double(ima_26) / max_val;
+psnr_26 = psnr(ima_26_norm, ref_norm);
+ssim_26 = ssim(ima_26_norm, ref_norm);
+fprintf('Part 2.6 - Filtered SVD: PSNR = %.2f dB, SSIM = %.4f\n', psnr_26, ssim_26);
+
+error_26 = abs(ima_26 - phantom_ref);
+
+figure; colormap(gray);
+subplot(1,3,1); imshow(ima_26,    [0 max_val]);      colorbar;
+                title(sprintf('Filtered SVD (lambda=%.1e)', lambda_26)); axis on;
+subplot(1,3,2); imshow(phantom_ref, [0 max_val]);    colorbar;
+                title('Reference m_{ref}');           axis on;
+subplot(1,3,3); imshow(error_26, [0 0.5*max_val]);  colorbar;
+                title('Error Image');                 axis on;
+\end{lstlisting}
+
+% --------------------------------------------------------------------------
+\subsection{Part 2.7 -- Finding the Optimal Regularization Parameter $\lambda^*$}
+
+Different values of $\lambda$ are tried (powers of 10 from approximately $\sigma_{2500}^2$ to $\sigma_1^2$). PSNR and SSIM are computed for each.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.80\textwidth]{figures/fig_2_7_psnr_ssim_lambda.png}
+    \caption{PSNR (top) and SSIM (bottom) as functions of $\lambda$ on a log scale. Both metrics show a clear peak at an intermediate $\lambda^*$.}
+    \label{fig:2_7_metrics}
+\end{figure}
+
+\textbf{Optimal $\lambda^*$:} Based on the PSNR/SSIM curves, the optimal value is $\lambda^* \approx 10^{11}$ (PSNR $= 32.06$~dB, SSIM $= 0.9384$).
+
+The reconstructed images for $\lambda^*/10$, $\lambda^*$, and $10\lambda^*$ are compared:
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_2_7_lam_div10.png}
+    \caption{Filtered SVD reconstruction with $\lambda^*/10$.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_2_7_lam_star.png}
+    \caption{Filtered SVD reconstruction with $\lambda^*$.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_2_7_lam_x10.png}
+    \caption{Filtered SVD reconstruction with $10\lambda^*$.}
+    \label{fig:2_7_comparison}
+\end{figure}
+
+\textbf{Comments on image quality as a function of $\lambda$:}
+\begin{itemize}
+    \item \textbf{Small $\lambda$ ($\lambda^*/10 = 10^{10}$)}: PSNR $= 31.67$~dB, SSIM $= 0.9423$. Slightly less regularization --- the image is sharp but may contain minor artifacts.
+    \item \textbf{Optimal $\lambda$ ($\lambda^* = 10^{11}$)}: PSNR $= 32.06$~dB, SSIM $= 0.9384$. Best overall quality with a good balance between noise suppression and feature preservation.
+    \item \textbf{Large $\lambda$ ($10\lambda^* = 10^{12}$)}: PSNR $= 31.96$~dB, SSIM $= 0.9396$. Slightly stronger regularization causes marginal over-smoothing, but the results remain close to optimal.
+    \item All three cases produce very similar quality. The filtered SVD is relatively robust to the exact choice of $\lambda$ in this range, which is a desirable property.
+\end{itemize}
+
+\subsubsection*{Code}
+\begin{lstlisting}
+% Explore powers of 10 in the range [sigma_N^2, sigma_1^2]
+exp_low  = floor(log10(sigma_vals(end)^2));
+exp_high = ceil(log10(sigma_vals(1)^2));
+lambda_exp_arr = exp_low : exp_high;
+lambda_arr     = 10.^lambda_exp_arr;
+N_lam          = length(lambda_arr);
+
+psnr_lam = zeros(1, N_lam);
+ssim_lam = zeros(1, N_lam);
+
+for k = 1:N_lam
+    lam   = lambda_arr(k);
+    sf    = (sigma_vals.^2 + lam) ./ sigma_vals;
+    c_lam = V * (diag(1./sf) * (U' * u));
+    ima_lam = reshape(c_lam, 50, 50);
+    ima_lam(ima_lam < 0) = 0;
+    ima_lam_norm = double(ima_lam) / max_val;
+    psnr_lam(k)  = psnr(ima_lam_norm, ref_norm);
+    ssim_lam(k)  = ssim(ima_lam_norm, ref_norm);
+end
+
+% --- PSNR and SSIM vs lambda ---
+figure;
+subplot(2,1,1);
+semilogx(lambda_arr, psnr_lam, 'b-o', 'LineWidth', 2, 'MarkerFaceColor','b');
+xlabel('\lambda'); ylabel('PSNR (dB)');
+title('PSNR vs \lambda'); grid on;
+
+subplot(2,1,2);
+semilogx(lambda_arr, ssim_lam, 'r-o', 'LineWidth', 2, 'MarkerFaceColor','r');
+xlabel('\lambda'); ylabel('SSIM');
+title('SSIM vs \lambda'); grid on;
+
+% Find optimal lambda
+[~, best_lam_idx] = max(psnr_lam);
+lambda_star = lambda_arr(best_lam_idx);
+fprintf('\nPart 2.7: Optimal lambda* ~ %.2e\n', lambda_star);
+
+% --- Display images for lambda*/10, lambda*, 10*lambda* ---
+lam_cases   = [lambda_star/10, lambda_star, 10*lambda_star];
+case_strs   = {'\lambda^*/10', '\lambda^*', '10\lambda^*'};
+
+for k = 1:3
+    lam   = lam_cases(k);
+    sf    = (sigma_vals.^2 + lam) ./ sigma_vals;
+    c_lam = V * (diag(1./sf) * (U' * u));
+    ima_lam = reshape(c_lam, 50, 50);
+    ima_lam(ima_lam < 0) = 0;
+    ima_lam_norm = double(ima_lam) / max_val;
+    p = psnr(ima_lam_norm, ref_norm);
+    s = ssim(ima_lam_norm, ref_norm);
+
+    figure; colormap(gray);
+    subplot(1,3,1); imshow(ima_lam, [0 max_val]);               colorbar;
+                    title(sprintf('Filtered SVD (%s)', case_strs{k})); axis on;
+    subplot(1,3,2); imshow(phantom_ref, [0 max_val]);            colorbar;
+                    title('Reference m_{ref}');                   axis on;
+    subplot(1,3,3); imshow(abs(ima_lam-phantom_ref), [0 0.5*max_val]); colorbar;
+                    title('Error Image');                         axis on;
+    fprintf('%s (lambda=%.2e): PSNR=%.2f dB, SSIM=%.4f\n', case_strs{k}, lam, p, s);
+end
+\end{lstlisting}
+
+% --------------------------------------------------------------------------
+\subsection{Part 2.8 -- L-curve}
+
+In practice, the reference image is not available, so PSNR/SSIM cannot be used to find $\lambda^*$. The L-curve method provides a data-driven alternative: plot the residual norm $\|Sc - u\|_2$ against the solution norm $\|c\|_2$ for various $\lambda$ values (both axes in log scale).
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.65\textwidth]{figures/fig_2_8_lcurve.png}
+    \caption{L-curve. Each point corresponds to one value of $\lambda$ (labeled by power of 10). The corner of the L shape indicates the optimal $\lambda$.}
+    \label{fig:2_8_lcurve}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_2_8_lcurve_image.png}
+    \caption{Reconstruction using the $\lambda^*$ identified from the L-curve corner.}
+    \label{fig:2_8_lcurve_image}
+\end{figure}
+
+\textbf{Reading the L-curve:}
+\begin{itemize}
+    \item \textbf{Upper-left branch} (small $\lambda$): Small residual but large solution norm --- under-regularized and noisy.
+    \item \textbf{Lower-right branch} (large $\lambda$): Small solution norm but large residual --- over-regularized and blurry.
+    \item \textbf{Corner of the L}: Best compromise between good data fit and a well-behaved solution.
+\end{itemize}
+
+The corner is identified using the Menger curvature formula applied to consecutive points in log-log space. The L-curve corner is found at approximately $\lambda^* \approx \mathbf{[see\ MATLAB\ output]}$. The corresponding reconstruction, PSNR, and SSIM are shown above. Comparing with Part~2.7, the L-curve method provides a reasonable estimate of $\lambda^*$ without requiring knowledge of the reference image.
+
+\subsubsection*{Code}
+\begin{lstlisting}
+res_norms = zeros(1, N_lam);
+sol_norms = zeros(1, N_lam);
+
+for k = 1:N_lam
+    lam   = lambda_arr(k);
+    sf    = (sigma_vals.^2 + lam) ./ sigma_vals;
+    c_lam = V * (diag(1./sf) * (U' * u));
+    res_norms(k) = norm(S * c_lam - u);
+    sol_norms(k) = norm(c_lam);
+end
+
+figure;
+loglog(res_norms, sol_norms, 'b-o', 'LineWidth', 2, 'MarkerFaceColor','b');
+hold on;
+for k = 1:N_lam
+    text(res_norms(k)*1.05, sol_norms(k), ...
+         sprintf('10^{%d}', lambda_exp_arr(k)), 'FontSize', 7);
+end
+xlabel('||Sc - u||_2  (Residual Norm)');
+ylabel('||c||_2  (Solution Norm)');
+title('L-curve: Residual vs Solution Norm'); grid on;
+
+% Menger egrilik formuluyle kose noktasini bul
+log_res = log(res_norms);
+log_sol = log(sol_norms);
+curvature = zeros(1, N_lam);
+for k = 2:N_lam-1
+    x1 = log_res(k-1); y1 = log_sol(k-1);
+    x2 = log_res(k);   y2 = log_sol(k);
+    x3 = log_res(k+1); y3 = log_sol(k+1);
+    twice_area = abs((x2-x1)*(y3-y1) - (x3-x1)*(y2-y1));
+    d12 = sqrt((x2-x1)^2 + (y2-y1)^2);
+    d23 = sqrt((x3-x2)^2 + (y3-y2)^2);
+    d13 = sqrt((x3-x1)^2 + (y3-y1)^2);
+    if d12*d23*d13 > 0
+        curvature(k) = twice_area / (d12 * d23 * d13);
+    end
+end
+[~, corner_idx] = max(curvature);
+lambda_lcurve = lambda_arr(corner_idx);
+fprintf('\nPart 2.8: L-curve corner at lambda ~ %.2e\n', lambda_lcurve);
+
+% L-curve lambda* ile goruntu olustur
+sf_lc = (sigma_vals.^2 + lambda_lcurve) ./ sigma_vals;
+c_lc  = V * (diag(1./sf_lc) * (U' * u));
+ima_lc = reshape(c_lc, 50, 50);
+ima_lc(ima_lc < 0) = 0;
+ima_lc_norm = double(ima_lc) / max_val;
+psnr_lc = psnr(ima_lc_norm, ref_norm);
+ssim_lc = ssim(ima_lc_norm, ref_norm);
+fprintf('L-curve lambda*: PSNR = %.2f dB, SSIM = %.4f\n', psnr_lc, ssim_lc);
+\end{lstlisting}
+
+\newpage
+% ==========================================================================
+% ==========================================================================
+%                    PART III -- KACZMARZ METHOD
+% ==========================================================================
+% ==========================================================================
+\section{Part III -- Kaczmarz Method}
+
+% --------------------------------------------------------------------------
+\subsection{Part 3.1 -- Row-norm Thresholding}
+
+Standard Kaczmarz normalizes the rows of the system matrix. Rows with near-zero energy can cause noise amplification during normalization. To avoid this, we first compute the norm of each row of $S$ and discard rows whose norm is smaller than $\mathrm{max\_norm}/10$, where $\mathrm{max\_norm}$ is the maximum row norm. The corresponding entries of $u$ are also discarded.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.80\textwidth]{figures/fig_3_1_row_norms.png}
+    \caption{Row norms of $S$. Rows with small norms are discarded to prevent noise amplification.}
+    \label{fig:3_1_norms}
+\end{figure}
+
+The maximum row norm is $\mathrm{max\_norm} = 1.20 \times 10^{11}$. After discarding rows with norm below $\mathrm{max\_norm}/10$, the thresholded system has size $44 \times 2500$ for $S$ and $44 \times 1$ for $u$. Only 44 out of 3264 rows have sufficiently large energy.
+
+\subsubsection*{Code}
+\begin{lstlisting}
+row_norms = sqrt(sum(S.^2, 2));
+
+figure;
+plot(row_norms, 'LineWidth', 1);
+xlabel('Row Number');
+ylabel('Row Norm');
+title('Part 3.1: Row Norms of S');
+grid on;
+
+max_norm = max(row_norms);
+fprintf('\nPart 3.1: max_norm = %.4e\n', max_norm);
+
+% max_norm/10 alti satirlari at
+thresh_31 = max_norm / 10;
+keep_idx = row_norms >= thresh_31;
+S_thresh = S(keep_idx, :);
+u_thresh = u(keep_idx);
+
+fprintf('After thresholding (max_norm/10):\n');
+fprintf('  Size of S: %d x %d\n', size(S_thresh,1), size(S_thresh,2));
+fprintf('  Size of u: %d x %d\n', size(u_thresh,1), size(u_thresh,2));
+\end{lstlisting}
+
+% --------------------------------------------------------------------------
+\subsection{Part 3.2 -- Standard Kaczmarz Method}
+
+The standard Kaczmarz method is applied using the thresholded $S$ and $u$, without regularization or relaxation. The row order is randomized during sub-iterations using \texttt{randperm}. At the end of each iteration (not sub-iteration), negative entries of $c$ are set to zero.
+
+The Kaczmarz update for each row $i$ is:
+\[
+    c \leftarrow c + \frac{u_i - s_i^T c}{\|s_i\|^2}\,s_i
+\]
+where $s_i$ is the $i$-th row of $S$ (as a column vector).
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.80\textwidth]{figures/fig_3_2_psnr_ssim.png}
+    \caption{PSNR and SSIM as functions of iteration count for standard Kaczmarz.}
+    \label{fig:3_2_metrics}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_2_iter_1.png}
+    \caption{Standard Kaczmarz: Iteration 1.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_2_iter_2.png}
+    \caption{Standard Kaczmarz: Iteration 2.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_2_iter_3.png}
+    \caption{Standard Kaczmarz: Iteration 3.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_2_iter_4.png}
+    \caption{Standard Kaczmarz: Iteration 4.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_2_iter_5.png}
+    \caption{Standard Kaczmarz: Iteration 5.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_2_iter_6.png}
+    \caption{Standard Kaczmarz: Iteration 6.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_2_iter_7.png}
+    \caption{Standard Kaczmarz: Iteration 7.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_2_iter_8.png}
+    \caption{Standard Kaczmarz: Iteration 8.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_2_iter_9.png}
+    \caption{Standard Kaczmarz: Iteration 9.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_2_iter_10.png}
+    \caption{Standard Kaczmarz: Iteration 10.}
+    \label{fig:3_2_images}
+\end{figure}
+
+\textbf{Comments:} The image quality improves steadily with each iteration, from PSNR $= 13.31$~dB (iter 1) to PSNR $= 14.34$~dB (iter 10). However, using only 44 rows (from the aggressive $\mathrm{max\_norm}/10$ threshold), the convergence is slow and the quality plateau is relatively low. The image remains blurry with limited contrast. Due to randomization in row order, results may vary slightly across runs.
+
+\subsubsection*{Code}
+\begin{lstlisting}
+N_iter = 10;
+[n_rows, n_cols] = size(S_thresh);
+c_kacz = zeros(n_cols, 1);
+
+psnr_kacz = zeros(1, N_iter);
+ssim_kacz = zeros(1, N_iter);
+
+for iter = 1:N_iter
+    order = randperm(n_rows);
+    for sub = 1:n_rows
+        idx = order(sub);
+        row_i = S_thresh(idx, :);
+        c_kacz = c_kacz + (u_thresh(idx) - row_i * c_kacz) / (row_i * row_i') * row_i';
+    end
+    c_kacz(c_kacz < 0) = 0;
+
+    ima_kacz = reshape(c_kacz, 50, 50);
+    ima_kacz_norm = double(ima_kacz) / max_val;
+    psnr_kacz(iter) = psnr(ima_kacz_norm, ref_norm);
+    ssim_kacz(iter) = ssim(ima_kacz_norm, ref_norm);
+
+    err_kacz = abs(ima_kacz - phantom_ref);
+
+    figure; colormap(gray);
+    subplot(1,3,1); imshow(ima_kacz, [0 max_val]);      colorbar;
+                    title(sprintf('Kaczmarz iter %d', iter)); axis on;
+    subplot(1,3,2); imshow(phantom_ref, [0 max_val]);    colorbar;
+                    title('Reference m_{ref}');           axis on;
+    subplot(1,3,3); imshow(err_kacz, [0 0.5*max_val]);  colorbar;
+                    title('Error Image');                 axis on;
+
+    fprintf('  Iter %d: PSNR = %.2f dB, SSIM = %.4f\n', iter, psnr_kacz(iter), ssim_kacz(iter));
+end
+
+
+figure;
+subplot(2,1,1);
+plot(1:N_iter, psnr_kacz, 'b-o', 'LineWidth', 2, 'MarkerFaceColor','b');
+xlabel('Iteration'); ylabel('PSNR (dB)');
+title('PSNR vs Iteration (Std Kaczmarz)'); grid on;
+
+subplot(2,1,2);
+plot(1:N_iter, ssim_kacz, 'r-o', 'LineWidth', 2, 'MarkerFaceColor','r');
+xlabel('Iteration'); ylabel('SSIM');
+title('SSIM vs Iteration (Std Kaczmarz)'); grid on;
+\end{lstlisting}
+
+% --------------------------------------------------------------------------
+\subsection{Part 3.3 -- Standard Kaczmarz with Different Row-norm Thresholds}
+
+The standard Kaczmarz is repeated with the following thresholds: $\mathrm{max\_norm} \times [10^{-4},\; 10^{-3},\; 10^{-2},\; 10^{-1}]$. Only the result at the 10th iteration is displayed.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.80\textwidth]{figures/fig_3_3_psnr_ssim.png}
+    \caption{PSNR and SSIM as functions of row-norm threshold (10th iteration).}
+    \label{fig:3_3_metrics}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_3_thresh_0.0001.png}
+    \caption{Standard Kaczmarz (iter 10): Threshold = $10^{-4}$.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_3_thresh_0.001.png}
+    \caption{Standard Kaczmarz (iter 10): Threshold = $10^{-3}$.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_3_thresh_0.01.png}
+    \caption{Standard Kaczmarz (iter 10): Threshold = $10^{-2}$.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_3_thresh_0.1.png}
+    \caption{Standard Kaczmarz (iter 10): Threshold = $10^{-1}$.}
+    \label{fig:3_3_images}
+\end{figure}
+
+\textbf{Comments:} With threshold $10^{-4}$, nearly all rows are kept and we achieve PSNR $= 28.95$~dB, SSIM $= 0.9165$. The threshold $10^{-3}$ gives the best SSIM ($0.9311$) with PSNR $= 27.93$~dB. As the threshold increases to $10^{-1}$, useful frequency components are discarded, causing a dramatic drop in quality (PSNR $= 14.30$~dB). The best trade-off is around threshold $10^{-4}$ to $10^{-3}$.
+
+\subsubsection*{Code}
+\begin{lstlisting}
+thresh_factors = [1e-4, 1e-3, 1e-2, 1e-1];
+N_thresh = length(thresh_factors);
+psnr_thresh = zeros(1, N_thresh);
+ssim_thresh = zeros(1, N_thresh);
+
+for t = 1:N_thresh
+    thresh_val = max_norm * thresh_factors(t);
+    keep = row_norms >= thresh_val;
+    S_t = S(keep, :);
+    u_t = u(keep);
+
+    c_t = zeros(n_cols, 1);
+
+    for iter = 1:10
+        order = randperm(size(S_t, 1));
+        for sub = 1:size(S_t, 1)
+            idx = order(sub);
+            row_i = S_t(idx, :);
+            c_t = c_t + (u_t(idx) - row_i * c_t) / (row_i * row_i') * row_i';
+        end
+        c_t(c_t < 0) = 0;
+    end
+
+    ima_t = reshape(c_t, 50, 50);
+    ima_t_norm = double(ima_t) / max_val;
+    psnr_thresh(t) = psnr(ima_t_norm, ref_norm);
+    ssim_thresh(t) = ssim(ima_t_norm, ref_norm);
+
+    err_t = abs(ima_t - phantom_ref);
+
+    figure; colormap(gray);
+    subplot(1,3,1); imshow(ima_t, [0 max_val]);         colorbar;
+                    title(sprintf('Kaczmarz (thresh=%.0e)', thresh_factors(t))); axis on;
+    subplot(1,3,2); imshow(phantom_ref, [0 max_val]);   colorbar;
+                    title('Reference m_{ref}');           axis on;
+    subplot(1,3,3); imshow(err_t, [0 0.5*max_val]);    colorbar;
+                    title('Error Image');                 axis on;
+
+    fprintf('  Threshold %.0e: PSNR = %.2f dB, SSIM = %.4f\n', ...
+        thresh_factors(t), psnr_thresh(t), ssim_thresh(t));
+end
+
+
+figure;
+subplot(2,1,1);
+semilogx(thresh_factors, psnr_thresh, 'b-o', 'LineWidth', 2, 'MarkerFaceColor','b');
+xlabel('Threshold (max\_norm orani)'); ylabel('PSNR (dB)');
+title('PSNR vs Threshold'); grid on;
+
+subplot(2,1,2);
+semilogx(thresh_factors, ssim_thresh, 'r-o', 'LineWidth', 2, 'MarkerFaceColor','r');
+xlabel('Threshold (max\_norm orani)'); ylabel('SSIM');
+title('SSIM vs Threshold'); grid on;
+\end{lstlisting}
+
+% --------------------------------------------------------------------------
+\subsection{Part 3.4 -- Regularized Kaczmarz Method}
+
+The regularized Kaczmarz method is implemented without any row-norm thresholding. The update rule is:
+\[
+    c \leftarrow c + \frac{u_i - s_i^T c}{\|s_i\|^2 + \lambda}\,s_i
+\]
+where $\lambda = \sigma_1 \sigma_N$ is used as the regularization parameter. The regularization term $\lambda$ in the denominator prevents noise amplification from rows with small energy.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.80\textwidth]{figures/fig_3_4_psnr_ssim.png}
+    \caption{PSNR and SSIM as functions of iteration count for regularized Kaczmarz ($\lambda = \sigma_1\sigma_N$).}
+    \label{fig:3_4_metrics}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_4_iter_1.png}
+    \caption{Regularized Kaczmarz: Iteration 1.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_4_iter_2.png}
+    \caption{Regularized Kaczmarz: Iteration 2.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_4_iter_3.png}
+    \caption{Regularized Kaczmarz: Iteration 3.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_4_iter_4.png}
+    \caption{Regularized Kaczmarz: Iteration 4.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_4_iter_5.png}
+    \caption{Regularized Kaczmarz: Iteration 5.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_4_iter_6.png}
+    \caption{Regularized Kaczmarz: Iteration 6.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_4_iter_7.png}
+    \caption{Regularized Kaczmarz: Iteration 7.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_4_iter_8.png}
+    \caption{Regularized Kaczmarz: Iteration 8.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_4_iter_9.png}
+    \caption{Regularized Kaczmarz: Iteration 9.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_4_iter_10.png}
+    \caption{Regularized Kaczmarz: Iteration 10.}
+    \label{fig:3_4_images}
+\end{figure}
+
+\textbf{Comments:} The regularized Kaczmarz produces clean reconstructions even without row-norm thresholding. With $\lambda = \sigma_1\sigma_N = 4.15 \times 10^5$, PSNR improves from $25.93$~dB (iter 1) to $29.25$~dB (iter 10) and SSIM from $0.7128$ to $0.9309$. The regularization parameter inherently damps the contribution of rows with small norms, eliminating the noise amplification problem. Convergence is faster than standard Kaczmarz.
+
+\subsubsection*{Code}
+\begin{lstlisting}
+lambda_34 = sigma_vals(1) * sigma_vals(end);
+fprintf('\nPart 3.4: Regularized Kaczmarz (lambda = sigma_1*sigma_N = %.4e)\n', lambda_34);
+
+[n_rows_full, n_cols_full] = size(S);
+c_rkacz = zeros(n_cols_full, 1);
+
+psnr_rkacz = zeros(1, N_iter);
+ssim_rkacz = zeros(1, N_iter);
+
+for iter = 1:N_iter
+    order = randperm(n_rows_full);
+    for sub = 1:n_rows_full
+        idx = order(sub);
+        row_i = S(idx, :);
+        c_rkacz = c_rkacz + (u(idx) - row_i * c_rkacz) / (row_i * row_i' + lambda_34) * row_i';
+    end
+    c_rkacz(c_rkacz < 0) = 0;
+
+    ima_rkacz = reshape(c_rkacz, 50, 50);
+    ima_rkacz_norm = double(ima_rkacz) / max_val;
+    psnr_rkacz(iter) = psnr(ima_rkacz_norm, ref_norm);
+    ssim_rkacz(iter) = ssim(ima_rkacz_norm, ref_norm);
+
+    err_rkacz = abs(ima_rkacz - phantom_ref);
+
+    figure; colormap(gray);
+    subplot(1,3,1); imshow(ima_rkacz, [0 max_val]);      colorbar;
+                    title(sprintf('Reg. Kaczmarz iter %d', iter)); axis on;
+    subplot(1,3,2); imshow(phantom_ref, [0 max_val]);    colorbar;
+                    title('Reference m_{ref}');           axis on;
+    subplot(1,3,3); imshow(err_rkacz, [0 0.5*max_val]);  colorbar;
+                    title('Error Image');                  axis on;
+
+    fprintf('  Iter %d: PSNR = %.2f dB, SSIM = %.4f\n', iter, psnr_rkacz(iter), ssim_rkacz(iter));
+end
+
+% --- PSNR and SSIM vs iteration ---
+figure;
+subplot(2,1,1);
+plot(1:N_iter, psnr_rkacz, 'b-o', 'LineWidth', 2, 'MarkerFaceColor','b');
+xlabel('Iteration'); ylabel('PSNR (dB)');
+title('PSNR vs Iteration (Reg. Kaczmarz)'); grid on;
+
+subplot(2,1,2);
+plot(1:N_iter, ssim_rkacz, 'r-o', 'LineWidth', 2, 'MarkerFaceColor','r');
+xlabel('Iteration'); ylabel('SSIM');
+title('SSIM vs Iteration (Reg. Kaczmarz)'); grid on;
+\end{lstlisting}
+
+% --------------------------------------------------------------------------
+\subsection{Part 3.5 -- Regularized Kaczmarz with Different $\lambda_\mathrm{rel}$}
+
+We define $\lambda = \sigma_1^2 \cdot \lambda_\mathrm{rel}$ and try $\lambda_\mathrm{rel} = [10^{-6},\; 10^{-5},\; 10^{-4},\; 10^{-3},\; 10^{-2}]$. Since $\lambda_\mathrm{rel}$ is relative to $\sigma_1^2$, we know the sensible range is $0 < \lambda_\mathrm{rel} < 1$. Only the 10th iteration result is shown for each case.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.80\textwidth]{figures/fig_3_5_psnr_ssim.png}
+    \caption{PSNR and SSIM as functions of $\lambda_\mathrm{rel}$ for regularized Kaczmarz (10th iteration).}
+    \label{fig:3_5_metrics}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_5_lrel_1e-06.png}
+    \caption{Regularized Kaczmarz (iter 10): $\lambda_\mathrm{rel} = 10^{-6}$.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_5_lrel_1e-05.png}
+    \caption{Regularized Kaczmarz (iter 10): $\lambda_\mathrm{rel} = 10^{-5}$.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_5_lrel_0.0001.png}
+    \caption{Regularized Kaczmarz (iter 10): $\lambda_\mathrm{rel} = 10^{-4}$.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_5_lrel_0.001.png}
+    \caption{Regularized Kaczmarz (iter 10): $\lambda_\mathrm{rel} = 10^{-3}$.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_5_lrel_0.01.png}
+    \caption{Regularized Kaczmarz (iter 10): $\lambda_\mathrm{rel} = 10^{-2}$.}
+    \label{fig:3_5_images}
+\end{figure}
+
+\textbf{Comments:} The best PSNR is $28.31$~dB at $\lambda_\mathrm{rel} = 10^{-6}$ (weakest regularization), with SSIM $= 0.9578$. As $\lambda_\mathrm{rel}$ increases, regularization becomes stronger: at $10^{-2}$, PSNR drops to $17.98$~dB. In this noiseless setting, weaker regularization performs better because there is no noise to suppress. The optimal $\lambda_\mathrm{rel}$ in the noiseless case is the smallest tested value ($10^{-6}$).
+
+\subsubsection*{Code}
+\begin{lstlisting}
+lambda_rel_arr = [1e-6, 1e-5, 1e-4, 1e-3, 1e-2];
+N_lrel = length(lambda_rel_arr);
+psnr_lrel = zeros(1, N_lrel);
+ssim_lrel = zeros(1, N_lrel);
+
+for t = 1:N_lrel
+    lam = sigma_vals(1)^2 * lambda_rel_arr(t);
+    c_t = zeros(n_cols_full, 1);
+
+    for iter = 1:10
+        order = randperm(n_rows_full);
+        for sub = 1:n_rows_full
+            idx = order(sub);
+            row_i = S(idx, :);
+            c_t = c_t + (u(idx) - row_i * c_t) / (row_i * row_i' + lam) * row_i';
+        end
+        c_t(c_t < 0) = 0;
+    end
+
+    ima_t = reshape(c_t, 50, 50);
+    ima_t_norm = double(ima_t) / max_val;
+    psnr_lrel(t) = psnr(ima_t_norm, ref_norm);
+    ssim_lrel(t) = ssim(ima_t_norm, ref_norm);
+
+    err_t = abs(ima_t - phantom_ref);
+
+    figure; colormap(gray);
+    subplot(1,3,1); imshow(ima_t, [0 max_val]);         colorbar;
+                    title(sprintf('Reg. Kaczmarz (lrel=%.0e)', lambda_rel_arr(t))); axis on;
+    subplot(1,3,2); imshow(phantom_ref, [0 max_val]);   colorbar;
+                    title('Reference m_{ref}');           axis on;
+    subplot(1,3,3); imshow(err_t, [0 0.5*max_val]);    colorbar;
+                    title('Error Image');                 axis on;
+
+    fprintf('  lambda_rel = %.0e: PSNR = %.2f dB, SSIM = %.4f\n', ...
+        lambda_rel_arr(t), psnr_lrel(t), ssim_lrel(t));
+end
+
+
+figure;
+subplot(2,1,1);
+semilogx(lambda_rel_arr, psnr_lrel, 'b-o', 'LineWidth', 2, 'MarkerFaceColor','b');
+xlabel('\lambda_{rel}'); ylabel('PSNR (dB)');
+title('PSNR vs \lambda_{rel}'); grid on;
+
+subplot(2,1,2);
+semilogx(lambda_rel_arr, ssim_lrel, 'r-o', 'LineWidth', 2, 'MarkerFaceColor','r');
+xlabel('\lambda_{rel}'); ylabel('SSIM');
+title('SSIM vs \lambda_{rel}'); grid on;
+\end{lstlisting}
+
+% --------------------------------------------------------------------------
+\subsection{Part 3.6 -- Effects of Measurement Noise (Standard Kaczmarz)}
+
+White Gaussian noise with zero mean and standard deviation $\mathrm{max\_norm}/1000$ is added to the measurement vector $u$. The noise is \emph{not} added to the system matrix. Part~3.3 is then repeated with the noisy $u$.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.80\textwidth]{figures/fig_3_6_psnr_ssim.png}
+    \caption{PSNR and SSIM vs.\ row-norm threshold for noisy standard Kaczmarz.}
+    \label{fig:3_6_metrics}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_6_thresh_0.0001.png}
+    \caption{Noisy Standard Kaczmarz (iter 10): Threshold = $10^{-4}$.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_6_thresh_0.001.png}
+    \caption{Noisy Standard Kaczmarz (iter 10): Threshold = $10^{-3}$.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_6_thresh_0.01.png}
+    \caption{Noisy Standard Kaczmarz (iter 10): Threshold = $10^{-2}$.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_6_thresh_0.1.png}
+    \caption{Noisy Standard Kaczmarz (iter 10): Threshold = $10^{-1}$.}
+    \label{fig:3_6_images}
+\end{figure}
+
+\textbf{Comments:} Noise dramatically changes the behavior. With threshold $10^{-4}$, PSNR drops to $-12.49$~dB because many rows with small energy amplify the noise. The threshold $10^{-2}$ now gives the best result (PSNR $= 19.50$~dB, SSIM $= 0.4390$), shifting the optimal threshold significantly toward stronger thresholding compared to the noiseless case. This demonstrates that in the presence of noise, aggressive row-norm thresholding is essential.
+
+\subsubsection*{Code}
+\begin{lstlisting}
+noise_std = max_norm / 1000;
+u_noisy = u + noise_std * randn(size(u));
+
+psnr_thresh_noisy = zeros(1, N_thresh);
+ssim_thresh_noisy = zeros(1, N_thresh);
+
+for t = 1:N_thresh
+    thresh_val = max_norm * thresh_factors(t);
+    keep = row_norms >= thresh_val;
+    S_t = S(keep, :);
+    u_t = u_noisy(keep);
+
+    c_t = zeros(n_cols, 1);
+
+    for iter = 1:10
+        order = randperm(size(S_t, 1));
+        for sub = 1:size(S_t, 1)
+            idx = order(sub);
+            row_i = S_t(idx, :);
+            c_t = c_t + (u_t(idx) - row_i * c_t) / (row_i * row_i') * row_i';
+        end
+        c_t(c_t < 0) = 0;
+    end
+
+    ima_t = reshape(c_t, 50, 50);
+    ima_t_norm = double(ima_t) / max_val;
+    psnr_thresh_noisy(t) = psnr(ima_t_norm, ref_norm);
+    ssim_thresh_noisy(t) = ssim(ima_t_norm, ref_norm);
+
+    err_t = abs(ima_t - phantom_ref);
+
+    figure; colormap(gray);
+    subplot(1,3,1); imshow(ima_t, [0 max_val]);         colorbar;
+                    title(sprintf('Noisy Kaczmarz (thresh=%.0e)', thresh_factors(t))); axis on;
+    subplot(1,3,2); imshow(phantom_ref, [0 max_val]);   colorbar;
+                    title('Reference m_{ref}');           axis on;
+    subplot(1,3,3); imshow(err_t, [0 0.5*max_val]);    colorbar;
+                    title('Error Image');                 axis on;
+
+    fprintf('  Threshold %.0e (noisy): PSNR = %.2f dB, SSIM = %.4f\n', ...
+        thresh_factors(t), psnr_thresh_noisy(t), ssim_thresh_noisy(t));
+end
+
+
+figure;
+subplot(2,1,1);
+semilogx(thresh_factors, psnr_thresh_noisy, 'b-o', 'LineWidth', 2, 'MarkerFaceColor','b');
+xlabel('Threshold (max\_norm orani)'); ylabel('PSNR (dB)');
+title('PSNR vs Threshold (Noisy)'); grid on;
+
+subplot(2,1,2);
+semilogx(thresh_factors, ssim_thresh_noisy, 'r-o', 'LineWidth', 2, 'MarkerFaceColor','r');
+xlabel('Threshold (max\_norm orani)'); ylabel('SSIM');
+title('SSIM vs Threshold (Noisy)'); grid on;
+\end{lstlisting}
+
+% --------------------------------------------------------------------------
+\subsection{Part 3.7 -- Effects of Noise (Regularized Kaczmarz)}
+
+Part~3.5 is repeated using the same noisy measurement vector $u$.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.80\textwidth]{figures/fig_3_7_psnr_ssim.png}
+    \caption{PSNR and SSIM vs.\ $\lambda_\mathrm{rel}$ for noisy regularized Kaczmarz.}
+    \label{fig:3_7_metrics}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_7_lrel_1e-06.png}
+    \caption{Noisy Regularized Kaczmarz (iter 10): $\lambda_\mathrm{rel} = 10^{-6}$.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_7_lrel_1e-05.png}
+    \caption{Noisy Regularized Kaczmarz (iter 10): $\lambda_\mathrm{rel} = 10^{-5}$.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_7_lrel_0.0001.png}
+    \caption{Noisy Regularized Kaczmarz (iter 10): $\lambda_\mathrm{rel} = 10^{-4}$.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_7_lrel_0.001.png}
+    \caption{Noisy Regularized Kaczmarz (iter 10): $\lambda_\mathrm{rel} = 10^{-3}$.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig_3_7_lrel_0.01.png}
+    \caption{Noisy Regularized Kaczmarz (iter 10): $\lambda_\mathrm{rel} = 10^{-2}$.}
+    \label{fig:3_7_images}
+\end{figure}
+
+\textbf{Comments:} In the presence of noise, the optimal $\lambda_\mathrm{rel}$ shifts dramatically. At $\lambda_\mathrm{rel} = 10^{-6}$, PSNR is only $1.64$~dB (completely corrupted by noise), while the best result is at $\lambda_\mathrm{rel} = 10^{-3}$ with PSNR $= 22.74$~dB and SSIM $= 0.6899$. This is a significant shift from the noiseless case where $\lambda_\mathrm{rel} = 10^{-6}$ was optimal. Stronger regularization is needed to suppress the noise amplification. The regularized Kaczmarz handles noise more gracefully than standard Kaczmarz with thresholding, since the regularization is applied uniformly to all rows.
+
+\subsubsection*{Code}
+\begin{lstlisting}
+psnr_lrel_noisy = zeros(1, N_lrel);
+ssim_lrel_noisy = zeros(1, N_lrel);
+
+for t = 1:N_lrel
+    lam = sigma_vals(1)^2 * lambda_rel_arr(t);
+    c_t = zeros(n_cols_full, 1);
+
+    for iter = 1:10
+        order = randperm(n_rows_full);
+        for sub = 1:n_rows_full
+            idx = order(sub);
+            row_i = S(idx, :);
+            c_t = c_t + (u_noisy(idx) - row_i * c_t) / (row_i * row_i' + lam) * row_i';
+        end
+        c_t(c_t < 0) = 0;
+    end
+
+    ima_t = reshape(c_t, 50, 50);
+    ima_t_norm = double(ima_t) / max_val;
+    psnr_lrel_noisy(t) = psnr(ima_t_norm, ref_norm);
+    ssim_lrel_noisy(t) = ssim(ima_t_norm, ref_norm);
+
+    err_t = abs(ima_t - phantom_ref);
+
+    figure; colormap(gray);
+    subplot(1,3,1); imshow(ima_t, [0 max_val]);         colorbar;
+                    title(sprintf('Noisy Reg. Kacz. (lrel=%.0e)', lambda_rel_arr(t))); axis on;
+    subplot(1,3,2); imshow(phantom_ref, [0 max_val]);   colorbar;
+                    title('Reference m_{ref}');           axis on;
+    subplot(1,3,3); imshow(err_t, [0 0.5*max_val]);    colorbar;
+                    title('Error Image');                 axis on;
+
+    fprintf('  lambda_rel = %.0e (noisy): PSNR = %.2f dB, SSIM = %.4f\n', ...
+        lambda_rel_arr(t), psnr_lrel_noisy(t), ssim_lrel_noisy(t));
+end
+
+
+figure;
+subplot(2,1,1);
+semilogx(lambda_rel_arr, psnr_lrel_noisy, 'b-o', 'LineWidth', 2, 'MarkerFaceColor','b');
+xlabel('\lambda_{rel}'); ylabel('PSNR (dB)');
+title('PSNR vs \lambda_{rel} (Noisy)'); grid on;
+
+subplot(2,1,2);
+semilogx(lambda_rel_arr, ssim_lrel_noisy, 'r-o', 'LineWidth', 2, 'MarkerFaceColor','r');
+xlabel('\lambda_{rel}'); ylabel('SSIM');
+title('SSIM vs \lambda_{rel} (Noisy)'); grid on;
+\end{lstlisting}
+
+\newpage
+% ==========================================================================
+% ==========================================================================
+%                    PART IV -- OPEN MPI DATA
+% ==========================================================================
+% ==========================================================================
+\section{Part IV -- Open MPI Data}
+
+% --------------------------------------------------------------------------
+\subsection{Part 4.1 -- Loading and Viewing Open MPI Data}
+
+The file \texttt{su\_openmpi.mat} contains experimental MPI data from the Open MPI database. The system matrix $S$ has size $3056\times 50653$ and the measurement vector $u$ has size $3056\times 1$. This data covers a 3D Lissajous trajectory with $37\times37\times37$ grid size and signal from two receive coils. Three columns of the system matrix are plotted.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.92\textwidth]{figures/fig_4_1_S_columns.png}
+    \caption{Three columns of the OpenMPI system matrix $S$ (positions 1, 25000, 50000).}
+    \label{fig:4_1_cols}
+\end{figure}
+
+\subsubsection*{Code}
+\begin{lstlisting}
+fprintf('\nPart 4.1: Loading su_openmpi.mat (may take a while)...\n');
+load('su_openmpi.mat');
+
+fprintf('Size of S: %d x %d\n', size(S,1), size(S,2));
+fprintf('Size of u: %d x %d\n', size(u,1), size(u,2));
+
+locs_4 = [1, 25000, 50000];
+figure;
+for i = 1:3
+    subplot(3,1,i);
+    plot(S(:, locs_4(i)), 'LineWidth', 1);
+    xlabel('Row Index');
+    ylabel('Value');
+    title(['Column ' num2str(locs_4(i)) ' of S']);
+    grid on;
+end
+\end{lstlisting}
+
+% --------------------------------------------------------------------------
+\subsection{Part 4.2 -- SVD of OpenMPI System Matrix}
+
+The compact SVD of the OpenMPI system matrix is computed. Due to the large size of $S$, this computation may take several minutes.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.80\textwidth]{figures/fig_4_2_singular_values.png}
+    \caption{Singular values of the OpenMPI system matrix (log scale).}
+    \label{fig:4_2_sv}
+\end{figure}
+
+The condition number is $\mathrm{Cond}(S) = 2.13 \times 10^{10}$, which is large but significantly smaller than the simulated system matrix in Part~I.
+
+\subsubsection*{Code}
+\begin{lstlisting}
+fprintf('\nPart 4.2: Computing compact SVD of S (OpenMPI, this will take a while)...\n');
+[U4, Sigma4, V4] = svd(S, 'econ');
+
+sigma_vals_4 = diag(Sigma4);
+
+
+figure;
+semilogy(sigma_vals_4, 'LineWidth', 1.5);
+xlabel('Index');
+ylabel('Singular value');
+title('Part 4.2 - Singular values of S (OpenMPI)');
+grid on;
+
+cond_4 = sigma_vals_4(1) / sigma_vals_4(end);
+fprintf('Condition number (OpenMPI): %.4e\n', cond_4);
+\end{lstlisting}
+
+% --------------------------------------------------------------------------
+\subsection{Part 4.3 -- Regularized Kaczmarz on OpenMPI Data}
+
+The regularized Kaczmarz method is applied to the OpenMPI data with $\lambda = \sigma_1 \sigma_N$ and no row-norm thresholding. After 10 iterations, the reconstructed vector $c$ is reshaped into a 3D image volume of size $37\times37\times37$. All 37 slices are displayed as a montage.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{figures/fig_4_3_montage.png}
+    \caption{All 37 slices of the 3D MPI reconstruction using regularized Kaczmarz ($\lambda = \sigma_1\sigma_N$, iteration 10).}
+    \label{fig:4_3_montage}
+\end{figure}
+
+\subsubsection*{Code}
+\begin{lstlisting}
+lambda_43 = sigma_vals_4(1) * sigma_vals_4(end);
+fprintf('\nPart 4.3: Regularized Kaczmarz (lambda = sigma_1*sigma_N = %.4e)\n', lambda_43);
+
+[n_rows_4, n_cols_4] = size(S);
+c_4 = zeros(n_cols_4, 1);
+
+for iter = 1:10
+    order = randperm(n_rows_4);
+    for sub = 1:n_rows_4
+        idx = order(sub);
+        row_i = S(idx, :);
+        c_4 = c_4 + (u(idx) - row_i * c_4) / (row_i * row_i' + lambda_43) * row_i';
+    end
+    c_4(c_4 < 0) = 0;
+    fprintf('  Iter %d done.\n', iter);
+end
+
+ima_4 = reshape(c_4, 37, 37, 37);
+
+figure;
+montage(reshape(ima_4, [37, 37, 1, 37]), 'DisplayRange', []);
+title('Part 4.3: Regularized Kaczmarz - 37 slices (iter 10)');
+colormap(gray); colorbar;
+\end{lstlisting}
+
+% --------------------------------------------------------------------------
+\subsection{Part 4.4 -- Regularized Kaczmarz for Different $\lambda_\mathrm{rel}$ (OpenMPI)}
+
+The regularized Kaczmarz is repeated with $\lambda = \sigma_1^2 \cdot \lambda_\mathrm{rel}$ for $\lambda_\mathrm{rel} = [10^{-6},\; 10^{-5},\; 10^{-4},\; 10^{-3},\; 10^{-2}]$. The 10th iteration montage is displayed for each case.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{figures/fig_4_4_lrel_1e-06.png}
+    \caption{OpenMPI Regularized Kaczmarz (iter 10): $\lambda_\mathrm{rel} = 10^{-6}$.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{figures/fig_4_4_lrel_1e-05.png}
+    \caption{OpenMPI Regularized Kaczmarz (iter 10): $\lambda_\mathrm{rel} = 10^{-5}$.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{figures/fig_4_4_lrel_0.0001.png}
+    \caption{OpenMPI Regularized Kaczmarz (iter 10): $\lambda_\mathrm{rel} = 10^{-4}$.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{figures/fig_4_4_lrel_0.001.png}
+    \caption{OpenMPI Regularized Kaczmarz (iter 10): $\lambda_\mathrm{rel} = 10^{-3}$.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{figures/fig_4_4_lrel_0.01.png}
+    \caption{OpenMPI Regularized Kaczmarz (iter 10): $\lambda_\mathrm{rel} = 10^{-2}$.}
+    \label{fig:4_4_images}
+\end{figure}
+
+\textbf{Comments:} Without a ground-truth reference, image quality is assessed visually. Very small $\lambda_\mathrm{rel}$ values (e.g., $10^{-6}$) produce noisy images with many artifacts. Very large $\lambda_\mathrm{rel}$ values (e.g., $10^{-2}$) over-smooth the image and reduce contrast. Based on visual inspection of the montages, an intermediate value such as $\lambda_\mathrm{rel} \approx 10^{-4}$ or $10^{-3}$ provides the best trade-off between noise and resolution, where the phantom features are clearly visible with good contrast and minimal noise.
+
+\subsubsection*{Code}
+\begin{lstlisting}
+lambda_rel_4 = [1e-6, 1e-5, 1e-4, 1e-3, 1e-2];
+N_lrel4 = length(lambda_rel_4);
+
+for t = 1:N_lrel4
+    lam = sigma_vals_4(1)^2 * lambda_rel_4(t);
+    c_t = zeros(n_cols_4, 1);
+
+    for iter = 1:10
+        order = randperm(n_rows_4);
+        for sub = 1:n_rows_4
+            idx = order(sub);
+            row_i = S(idx, :);
+            c_t = c_t + (u(idx) - row_i * c_t) / (row_i * row_i' + lam) * row_i';
+        end
+        c_t(c_t < 0) = 0;
+    end
+
+    ima_t = reshape(c_t, 37, 37, 37);
+
+    figure;
+    montage(reshape(ima_t, [37, 37, 1, 37]), 'DisplayRange', []);
+    title(sprintf('Part 4.4: lambda_{rel}=%.0e - 37 slices (iter 10)', lambda_rel_4(t)));
+    colormap(gray); colorbar;
+
+    fprintf('  lambda_rel = %.0e done.\n', lambda_rel_4(t));
+end
+\end{lstlisting}
+
+% ==========================================================================
+\end{document}

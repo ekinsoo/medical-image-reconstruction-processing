@@ -1,0 +1,713 @@
+\documentclass[11pt]{article}
+
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{amsmath}
+\usepackage{hyperref}
+
+\graphicspath{{outputs/}}
+
+\lstset{
+    language=Matlab,
+    basicstyle=\ttfamily\scriptsize,
+    keywordstyle=\color{blue!65!black},
+    commentstyle=\color{green!35!black},
+    stringstyle=\color{red!55!black},
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    stepnumber=1,
+    breaklines=true,
+    frame=single,
+    columns=fullflexible,
+    keepspaces=true
+}
+
+\newcommand{\maybeinclude}[2][]{%
+    \IfFileExists{#2}{\includegraphics[#1]{#2}}{\fbox{\parbox{0.82\linewidth}{Missing figure: \texttt{#2}. Run \texttt{hw5\_l1spirit.m} first.}}}%
+}
+
+\IfFileExists{outputs/results_macros.tex}{%
+    \input{outputs/results_macros.tex}
+}{%
+    \newcommand{\AccelerationR}{TBD}
+    \newcommand{\MaxVal}{TBD}
+    \newcommand{\LambdaSpirit}{TBD}
+    \newcommand{\BetaLoneSpirit}{TBD}
+    \newcommand{\WaveletBetaA}{TBD}
+    \newcommand{\WaveletBetaB}{TBD}
+    \newcommand{\WaveletBetaC}{TBD}
+    \newcommand{\WaveletBetaD}{TBD}
+    \newcommand{\PSNRZF}{TBD}
+    \newcommand{\SSIMZF}{TBD}
+    \newcommand{\PSNRWaveletA}{TBD}
+    \newcommand{\SSIMWaveletA}{TBD}
+    \newcommand{\PSNRWaveletB}{TBD}
+    \newcommand{\SSIMWaveletB}{TBD}
+    \newcommand{\PSNRWaveletC}{TBD}
+    \newcommand{\SSIMWaveletC}{TBD}
+    \newcommand{\PSNRWaveletD}{TBD}
+    \newcommand{\SSIMWaveletD}{TBD}
+    \newcommand{\PSNRSpiritOneNoDC}{TBD}
+    \newcommand{\SSIMSpiritOneNoDC}{TBD}
+    \newcommand{\PSNRSpiritOneDC}{TBD}
+    \newcommand{\SSIMSpiritOneDC}{TBD}
+    \newcommand{\PSNRSpiritLast}{TBD}
+    \newcommand{\SSIMSpiritLast}{TBD}
+    \newcommand{\PSNRLoneSpiritOne}{TBD}
+    \newcommand{\SSIMLoneSpiritOne}{TBD}
+    \newcommand{\PSNRLoneSpiritLast}{TBD}
+    \newcommand{\SSIMLoneSpiritLast}{TBD}
+}
+
+\providecommand{\WaveletBetaD}{0.1}
+\providecommand{\PSNRWaveletD}{Run Part 3}
+\providecommand{\SSIMWaveletD}{Run Part 3}
+
+\title{EEE 475/575 Medical Image Reconstruction \& Processing\\Homework \#5: l1-SPIRiT Reconstruction}
+\author{Özgür Ekin Sönmez\\ID: 22201966}
+\date{6 May 2026}
+
+\begin{document}
+\maketitle
+
+\section*{GenAI Usage Disclosure}
+OpenAI Codex based on GPT-5 was used to assist with MATLAB coding, figure/output organization, and LaTeX report drafting. The reconstruction implementation, parameter choices, results, and final submission were reviewed and are the responsibility of the student.
+
+\section{Overview}
+This homework implements compressed-sensing MRI reconstruction for an 8-channel Cartesian data set using random undersampling, wavelet-domain $\ell_1$ regularization, SPIRiT interpolation, and iterative $\ell_1$-SPIRiT. All final sum-of-squares (SoS) images are normalized by their 95th percentile. The reference image is the SoS combination of the fully sampled coil images, and
+\[
+    \texttt{max\_val} = \MaxVal
+\]
+is the maximum pixel intensity of this normalized reference. For PSNR and SSIM, both the image of interest and the reference are divided by this same \texttt{max\_val}.
+
+\section{Part 1: Fully Sampled Data}
+The magnitude image for each coil, the centered 2D Fourier spectra, and the SoS reference are shown below. The coil images have different spatial sensitivities, while the SoS image combines them into a single high-SNR reference.
+
+\begin{figure}[H]
+\centering
+\maybeinclude[width=0.82\linewidth]{outputs/part1_coil_images.png}
+\caption{Magnitude images for all coils.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybeinclude[width=0.82\linewidth]{outputs/part1_kspace_spectra.png}
+\caption{Log-scaled fully sampled k-space spectra for all coils.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybeinclude[width=0.42\linewidth]{outputs/part1_sos_reference.png}
+\caption{95th-percentile-normalized SoS reference image.}
+\end{figure}
+
+\paragraph{Relevant code.}
+\begin{lstlisting}
+kfull = fft2cStack(im);
+
+refSosRaw = sosCombine(im);
+refSos = normalizeByP95(refSosRaw);
+max_val = max(refSos(:));
+
+saveMontageFigure(abs(im), [], fullfile(outDir, 'part1_coil_images.png'), ...
+    'Part 1: Fully sampled coil magnitude images');
+saveMontageFigure(log1p(abs(kfull)), [], fullfile(outDir, 'part1_kspace_spectra.png'), ...
+    'Part 1: Fully sampled k-space spectra');
+saveImageFigure(refSos, [0 max_val], fullfile(outDir, 'part1_sos_reference.png'), ...
+    'Part 1: SoS reference image');
+\end{lstlisting}
+
+\section{Part 2: Sampling Mask and Random Undersampling}
+The mask samples a fraction of k-space, giving an overall acceleration
+\[
+    R = \frac{1}{\text{sampled fraction}} = \AccelerationR .
+\]
+The zero-filled reconstruction directly applies the mask in k-space and transforms back to the image domain. Its measured quality is PSNR $=\PSNRZF$ dB and SSIM $=\SSIMZF$.
+
+\begin{figure}[H]
+\centering
+\maybeinclude[width=0.42\linewidth]{outputs/part2_mask.png}
+\caption{Random sampling mask with a central calibration region.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybeinclude[width=0.82\linewidth]{outputs/part2_kspace_spectra.png}
+\caption{Log-scaled randomly undersampled k-space spectra.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybeinclude[width=0.82\linewidth]{outputs/part2_zerofill_coil_images.png}
+\caption{Zero-filled coil images.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybeinclude[width=0.42\linewidth]{outputs/part2_zerofill_sos.png}
+\hfill
+\maybeinclude[width=0.42\linewidth]{outputs/part2_zerofill_error.png}
+\caption{Zero-filled SoS image and absolute error image.}
+\end{figure}
+
+Compared with uniform undersampling, random undersampling spreads aliasing energy incoherently across the image. This produces noise-like artifacts rather than the coherent fold-over artifacts seen when regularly skipping k-space lines.
+
+\paragraph{Relevant code.}
+\begin{lstlisting}
+R = 1 / nnz(mask) * numel(mask);
+[imu, Mu] = randundersample(im, mask);
+
+zfSos = normalizeByP95(sosCombine(imu));
+[psnrZF, ssimZF] = computeQuality(zfSos, refSos, max_val);
+errZF = abs(zfSos - refSos);
+
+saveImageFigure(double(mask), [0 1], fullfile(outDir, 'part2_mask.png'), ...
+    sprintf('Part 2: Random sampling mask, R = %.3f', R));
+saveMontageFigure(log1p(abs(Mu)), [], fullfile(outDir, 'part2_kspace_spectra.png'), ...
+    'Part 2: Random undersampled k-space spectra');
+saveMontageFigure(abs(imu), [], fullfile(outDir, 'part2_zerofill_coil_images.png'), ...
+    'Part 2: Zero-fill coil magnitude images');
+saveImageFigure(zfSos, [0 max_val], fullfile(outDir, 'part2_zerofill_sos.png'), ...
+    'Part 2: Zero-fill SoS image');
+saveImageFigure(errZF, [0 0.2*max_val], fullfile(outDir, 'part2_zerofill_error.png'), ...
+    'Part 2: Zero-fill absolute error');
+
+function [imu, Mu] = randundersample(im, mask)
+    [Nx, Ny, Nc] = size(im);
+    Mu = zeros(Nx, Ny, Nc);
+    imu = zeros(Nx, Ny, Nc);
+    for c = 1:Nc
+        Mc = fft2c(im(:, :, c));
+        Mu(:, :, c) = Mc .* mask;
+        imu(:, :, c) = ifft2c(Mu(:, :, c));
+    end
+end
+\end{lstlisting}
+
+\section{Part 3: Wavelet-Domain $\ell_1$ Regularization}
+Wavelet sparsity is enforced with complex soft-thresholding. For a coefficient $x$, the threshold is $\beta |x|_{\max}$ and the shrinkage rule is
+\[
+    S_\beta(x)= \frac{x}{|x|}\max(0, |x|-\beta |x|_{\max}).
+\]
+Thresholding is applied to complex coil images, not to magnitude images.
+
+\begin{figure}[H]
+\centering
+\maybeinclude[width=0.82\linewidth]{outputs/part3_wavelet_coeff_before.png}
+\caption{Log-scaled wavelet coefficient magnitudes before thresholding.}
+\end{figure}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{ccc}
+\toprule
+$\beta$ & PSNR (dB) & SSIM \\
+\midrule
+\WaveletBetaA & \PSNRWaveletA & \SSIMWaveletA \\
+\WaveletBetaB & \PSNRWaveletB & \SSIMWaveletB \\
+\WaveletBetaC & \PSNRWaveletC & \SSIMWaveletC \\
+\WaveletBetaD & \PSNRWaveletD & \SSIMWaveletD \\
+\bottomrule
+\end{tabular}
+\caption{Wavelet-only regularization performance.}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\maybeinclude[width=0.24\linewidth]{outputs/part3_beta_1em04_sos.png}
+\maybeinclude[width=0.24\linewidth]{outputs/part3_beta_1em03_sos.png}
+\maybeinclude[width=0.24\linewidth]{outputs/part3_beta_1em02_sos.png}
+\maybeinclude[width=0.24\linewidth]{outputs/part3_beta_1em01_sos.png}
+\caption{Wavelet-regularized SoS images for increasing $\beta$.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybeinclude[width=0.24\linewidth]{outputs/part3_beta_1em04_error.png}
+\maybeinclude[width=0.24\linewidth]{outputs/part3_beta_1em03_error.png}
+\maybeinclude[width=0.24\linewidth]{outputs/part3_beta_1em02_error.png}
+\maybeinclude[width=0.24\linewidth]{outputs/part3_beta_1em01_error.png}
+\caption{Wavelet-regularized absolute error images for increasing $\beta$.}
+\end{figure}
+
+Small $\beta$ values preserve details but suppress less artifact energy. In this experiment, $\beta=\WaveletBetaA$ gives the best SSIM among the first tested values and is very close to the zero-filled PSNR, meaning that the threshold is weak enough to avoid visible loss of anatomical structure. It may also be useful to test even smaller values such as $10^{-5}$ or $10^{-6}$, because the current best low-threshold value is already the smallest value in the original sweep. Those lower values would behave almost like the zero-filled image with very mild wavelet shrinkage, and they could show whether a small amount of coefficient denoising improves SSIM without reducing PSNR.
+
+I also tested the extra larger value $\beta=\WaveletBetaD$ to make the thresholding effect more obvious. This aggressive threshold removes many wavelet coefficients, so the SoS image is expected to look visibly over-smoothed and the error image should become much stronger. Larger $\beta$ values remove more incoherent undersampling artifact, but excessive thresholding also removes anatomical detail and lowers image fidelity. This is already seen for $\beta=\WaveletBetaC$, and it becomes clearer for the additional $\beta=\WaveletBetaD$ experiment.
+
+\paragraph{Relevant code.}
+\begin{lstlisting}
+coeffBefore = zeros(Nx, Ny, Nc);
+for c = 1:Nc
+    wv = Wavelet('Daubechies', 4, 4);
+    coeffBefore(:, :, c) = wv * imu(:, :, c);
+end
+saveMontageFigure(log1p(abs(coeffBefore)), [], ...
+    fullfile(outDir, 'part3_wavelet_coeff_before.png'), ...
+    'Part 3: Wavelet coefficient magnitudes before thresholding');
+
+for b = 1:numel(betaListPart3)
+    beta = betaListPart3(b);
+    imth = zeros(Nx, Ny, Nc);
+    for c = 1:Nc
+        imth(:, :, c) = l1wavelet(imu(:, :, c), beta);
+    end
+
+    thSos = normalizeByP95(sosCombine(imth));
+    [psnrTh, ssimTh] = computeQuality(thSos, refSos, max_val);
+    errTh = abs(thSos - refSos);
+end
+
+function imth = l1wavelet(imr, beta)
+    wv = Wavelet('Daubechies', 4, 4);
+    coeffW = wv * imr;
+    maxCoeff = max(abs(coeffW(:)));
+    if maxCoeff == 0
+        imth = imr;
+        return;
+    end
+    mag = abs(coeffW);
+    shrink = max(0, mag - beta * maxCoeff) ./ (mag + eps);
+    coeffWth = coeffW .* shrink;
+    imth = wv' * coeffWth;
+end
+\end{lstlisting}
+
+\section{Part 4: SPIRiT Kernel Weights}
+A $3\times3$ SPIRiT kernel was calibrated from the central $32\times32$ region of k-space. For each target coil, the center point of that coil is excluded, while all 8 neighboring samples from the target coil and all 9 samples from every other coil are used. Therefore, the kernel has $(9N_c-1)\times N_c = 71\times8$ complex weights.
+
+\begin{figure}[H]
+\centering
+\maybeinclude[width=0.55\linewidth]{outputs/part4_kernel_lambda0.png}
+\caption{Magnitude of SPIRiT kernel weights for $\lambda=0$.}
+\end{figure}
+
+For reconstruction, I used $\lambda=\LambdaSpirit$. The kernel is sample-geometry independent, so the same calibrated weights are used at every k-space location and iteration.
+
+\paragraph{Relevant code.}
+\begin{lstlisting}
+Mc = extractCalibration(kfull, [32 32]);
+kernel0 = calibrateSpirit(Mc, 0);
+kernel = calibrateSpirit(Mc, lambdaSpirit);
+
+saveKernelFigure(kernel0, fullfile(outDir, 'part4_kernel_lambda0.png'), ...
+    'Part 4: SPIRiT kernel magnitude, lambda = 0');
+
+function kernel = calibrateSpirit(Mc, lambda)
+    [Nx, Ny, Nc] = size(Mc);
+    offsets = -1:1;
+    nFeat = 9 * Nc - 1;
+    nRows = (Nx - 2) * (Ny - 2);
+    kernel = zeros(nFeat, Nc);
+
+    for targetCoil = 1:Nc
+        A = zeros(nRows, nFeat);
+        y = zeros(nRows, 1);
+        row = 0;
+        for ix = 2:Nx-1
+            for iy = 2:Ny-1
+                row = row + 1;
+                feat = 0;
+                for coil = 1:Nc
+                    for dx = offsets
+                        for dy = offsets
+                            if coil == targetCoil && dx == 0 && dy == 0
+                                continue;
+                            end
+                            feat = feat + 1;
+                            A(row, feat) = Mc(ix + dx, iy + dy, coil);
+                        end
+                    end
+                end
+                y(row) = Mc(ix, iy, targetCoil);
+            end
+        end
+
+        normalMat = A' * A;
+        if lambda > 0
+            regScale = trace(normalMat) / nFeat;
+            normalMat = normalMat + lambda * regScale * eye(nFeat);
+        end
+        kernel(:, targetCoil) = normalMat \ (A' * y);
+    end
+end
+\end{lstlisting}
+
+\section{Part 5: One SPIRiT Iteration Without Data Consistency}
+One SPIRiT iteration estimates every k-space sample from neighboring multi-coil samples. Data consistency is not enforced in this part, so even acquired points are replaced by SPIRiT estimates. The resulting image has PSNR $=\PSNRSpiritOneNoDC$ dB and SSIM $=\SSIMSpiritOneNoDC$.
+
+The SPIRiT kernel estimation solves a regularized least-squares problem on the $32\times32$ calibration region. I used $\lambda=\LambdaSpirit$ for reconstruction. The role of $\lambda$ is to stabilize the inversion of $A^HA$ during kernel calibration. If $\lambda$ is too small, the calibrated weights can overfit the calibration data and become sensitive to noise or local correlations in the ACS region. If $\lambda$ is too large, the kernel weights are overly damped, which weakens the interpolation and leaves more residual undersampling artifact. The chosen value is small enough to preserve interpolation strength, but nonzero so that the kernel calibration is numerically more stable than the $\lambda=0$ case displayed in Part 4.
+
+\begin{figure}[H]
+\centering
+\maybeinclude[width=0.82\linewidth]{outputs/part5_spirit_coils.png}
+\caption{Coil images after one SPIRiT iteration without data consistency.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybeinclude[width=0.82\linewidth]{outputs/part5_spirit_kspace.png}
+\caption{K-space spectra after one SPIRiT iteration without data consistency.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybeinclude[width=0.42\linewidth]{outputs/part5_spirit_sos.png}
+\hfill
+\maybeinclude[width=0.42\linewidth]{outputs/part5_spirit_error.png}
+\caption{SoS image and error after one SPIRiT iteration without data consistency.}
+\end{figure}
+
+Without data consistency, the reconstruction can drift away from the measurements. The result is slightly worse than the zero-filled image because the SPIRiT operation replaces not only missing k-space values but also originally acquired reliable samples. Therefore, this part should be interpreted mainly as the effect of applying the calibrated kernel alone. The next part adds data consistency, which is essential for using SPIRiT as a reconstruction algorithm rather than only as an interpolation operator.
+
+\paragraph{Relevant code.}
+\begin{lstlisting}
+[imSpirit1, MSpirit1] = spirit(Mu, kernel);
+spirit1Sos = normalizeByP95(sosCombine(imSpirit1));
+[psnrSpirit1, ssimSpirit1] = computeQuality(spirit1Sos, refSos, max_val);
+errSpirit1 = abs(spirit1Sos - refSos);
+
+function [imr, Mr] = spirit(Mu, kernel)
+    [Nx, Ny, Nc] = size(Mu);
+    offsets = -1:1;
+    Mr = zeros(Nx, Ny, Nc);
+
+    for targetCoil = 1:Nc
+        feat = 0;
+        estimate = zeros(Nx, Ny);
+        for coil = 1:Nc
+            for dx = offsets
+                for dy = offsets
+                    if coil == targetCoil && dx == 0 && dy == 0
+                        continue;
+                    end
+                    feat = feat + 1;
+                    neighbor = shift2dZero(Mu(:, :, coil), dx, dy);
+                    estimate = estimate + kernel(feat, targetCoil) * neighbor;
+                end
+            end
+        end
+        Mr(:, :, targetCoil) = estimate;
+    end
+
+    imr = ifft2cStack(Mr);
+end
+\end{lstlisting}
+
+\section{Part 6: One Full SPIRiT Iteration With Data Consistency}
+After SPIRiT estimation, measured k-space points are restored from the acquired data. This full iteration gives PSNR $=\PSNRSpiritOneDC$ dB and SSIM $=\SSIMSpiritOneDC$.
+
+\begin{figure}[H]
+\centering
+\maybeinclude[width=0.82\linewidth]{outputs/part6_full1_coils.png}
+\caption{Coil images after one full SPIRiT iteration with data consistency.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybeinclude[width=0.82\linewidth]{outputs/part6_full1_kspace.png}
+\caption{K-space spectra after one full SPIRiT iteration with data consistency.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybeinclude[width=0.42\linewidth]{outputs/part6_full1_sos.png}
+\hfill
+\maybeinclude[width=0.42\linewidth]{outputs/part6_full1_error.png}
+\caption{SoS image and error after one full SPIRiT iteration with data consistency.}
+\end{figure}
+
+Data consistency prevents the reconstruction from overwriting known samples and improves stability relative to the no-DC case. The improvement from Part 5 to Part 6 is clear: PSNR increases from $\PSNRSpiritOneNoDC$ dB to $\PSNRSpiritOneDC$ dB, and SSIM increases from $\SSIMSpiritOneNoDC$ to $\SSIMSpiritOneDC$. This shows that the SPIRiT kernel is useful for estimating missing locations, but the measured k-space samples must remain fixed. Visually, the error image is also more concentrated around residual high-frequency differences rather than being spread broadly by replacing acquired data.
+
+\paragraph{Relevant code.}
+\begin{lstlisting}
+MFull1 = applyDataConsistency(MSpirit1, Mu, mask);
+imFull1 = ifft2cStack(MFull1);
+full1Sos = normalizeByP95(sosCombine(imFull1));
+[psnrFull1, ssimFull1] = computeQuality(full1Sos, refSos, max_val);
+errFull1 = abs(full1Sos - refSos);
+
+function Mdc = applyDataConsistency(Mr, Mu, mask)
+    Mdc = Mr;
+    for c = 1:size(Mr, 3)
+        tmp = Mdc(:, :, c);
+        acquired = Mu(:, :, c);
+        tmp(mask) = acquired(mask);
+        Mdc(:, :, c) = tmp;
+    end
+end
+\end{lstlisting}
+
+\section{Part 7: Ten SPIRiT Iterations}
+The SPIRiT kernel is calibrated once and then reused for all 10 iterations. At each iteration, SPIRiT estimation is followed by data consistency. The last iteration gives PSNR $=\PSNRSpiritLast$ dB and SSIM $=\SSIMSpiritLast$.
+
+\begin{figure}[H]
+\centering
+\maybeinclude[width=0.45\linewidth]{outputs/part7_psnr_iterations.png}
+\hfill
+\maybeinclude[width=0.45\linewidth]{outputs/part7_ssim_iterations.png}
+\caption{PSNR and SSIM versus SPIRiT iteration number.}
+\end{figure}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{ccc}
+\toprule
+Iteration & PSNR (dB) & SSIM \\
+\midrule
+1 & 30.63 & 0.8566 \\
+2 & 31.41 & 0.8652 \\
+3 & 31.93 & 0.8691 \\
+4 & 32.27 & 0.8707 \\
+5 & 32.50 & 0.8713 \\
+6 & 32.65 & 0.8712 \\
+7 & 32.76 & 0.8708 \\
+8 & 32.84 & 0.8701 \\
+9 & 32.88 & 0.8693 \\
+10 & 32.91 & 0.8683 \\
+\bottomrule
+\end{tabular}
+\caption{Quantitative results for 10 full SPIRiT iterations.}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\maybeinclude[width=0.82\linewidth]{outputs/part7_last_coils.png}
+\caption{Coil images after the last SPIRiT iteration.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybeinclude[width=0.82\linewidth]{outputs/part7_last_kspace.png}
+\caption{K-space spectra after the last SPIRiT iteration.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybeinclude[width=0.42\linewidth]{outputs/part7_last_sos.png}
+\hfill
+\maybeinclude[width=0.42\linewidth]{outputs/part7_last_error.png}
+\caption{Last SPIRiT SoS image and error.}
+\end{figure}
+
+The metric curves show whether repeated kernel application converges or amplifies residual interpolation error. PSNR increases monotonically from 30.63 dB to 32.91 dB, which indicates that repeated SPIRiT updates progressively improve the least-squares interpolation of missing k-space values. SSIM increases until approximately iteration 5, where it reaches 0.8713, and then decreases slightly even though PSNR continues to rise. This means that later iterations reduce global mean-square error but may also introduce mild structural smoothing or texture changes. Overall, the full SPIRiT reconstruction is substantially better than the zero-filled result and also better than the single-iteration result. With a small $3\times3$ kernel, the improvement eventually saturates because the interpolation uses only a very local neighborhood, especially in outer k-space where random sampling is sparse.
+
+\paragraph{Relevant code.}
+\begin{lstlisting}
+psnrSpirit = zeros(Niter, 1);
+ssimSpirit = zeros(Niter, 1);
+MrIter = Mu;
+imIter = imu;
+
+for it = 1:Niter
+    [~, MrTmp] = spirit(MrIter, kernel);
+    MrIter = applyDataConsistency(MrTmp, Mu, mask);
+    imIter = ifft2cStack(MrIter);
+
+    iterSos = normalizeByP95(sosCombine(imIter));
+    [psnrSpirit(it), ssimSpirit(it)] = computeQuality(iterSos, refSos, max_val);
+end
+
+errSpiritLast = abs(iterSos - refSos);
+saveMetricPlot(psnrSpirit, 'PSNR (dB)', fullfile(outDir, 'part7_psnr_iterations.png'), ...
+    'Part 7: SPIRiT PSNR versus iteration');
+saveMetricPlot(ssimSpirit, 'SSIM', fullfile(outDir, 'part7_ssim_iterations.png'), ...
+    'Part 7: SPIRiT SSIM versus iteration');
+\end{lstlisting}
+
+\section{Part 8: One Iteration of $\ell_1$-SPIRiT}
+The $\ell_1$-SPIRiT iteration applies data consistency, one SPIRiT update, wavelet-domain soft-thresholding, and a centered FFT back to k-space. I used $\beta=\BetaLoneSpirit$. One iteration gives PSNR $=\PSNRLoneSpiritOne$ dB and SSIM $=\SSIMLoneSpiritOne$.
+
+\begin{figure}[H]
+\centering
+\maybeinclude[width=0.82\linewidth]{outputs/part8_l1spirit1_coils.png}
+\caption{Coil images after one $\ell_1$-SPIRiT iteration.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybeinclude[width=0.82\linewidth]{outputs/part8_l1spirit1_kspace.png}
+\caption{K-space spectra after one $\ell_1$-SPIRiT iteration.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybeinclude[width=0.42\linewidth]{outputs/part8_l1spirit1_sos.png}
+\hfill
+\maybeinclude[width=0.42\linewidth]{outputs/part8_l1spirit1_error.png}
+\caption{One-iteration $\ell_1$-SPIRiT SoS image and error.}
+\end{figure}
+
+The wavelet step adds a sparsity prior to the SPIRiT consistency prior. This helps suppress incoherent artifacts from random undersampling, but the threshold must be chosen carefully to avoid oversmoothing.
+
+\paragraph{Relevant code.}
+\begin{lstlisting}
+[imL1OneAll, ML1OneAll] = l1spirit(Mu, mask, kernel, betaL1Spirit, 1);
+imL1One = imL1OneAll(:, :, :, 1);
+ML1One = ML1OneAll(:, :, :, 1);
+l1OneSos = normalizeByP95(sosCombine(imL1One));
+[psnrL1One, ssimL1One] = computeQuality(l1OneSos, refSos, max_val);
+errL1One = abs(l1OneSos - refSos);
+
+function [imr, Mr] = l1spirit(Mu, mask, kernel, beta, Niter)
+    [Nx, Ny, Nc] = size(Mu);
+    Mr = zeros(Nx, Ny, Nc, Niter);
+    imr = zeros(Nx, Ny, Nc, Niter);
+    MrCur = Mu;
+
+    for it = 1:Niter
+        MrCur = applyDataConsistency(MrCur, Mu, mask);
+        [imSpirit, ~] = spirit(MrCur, kernel);
+
+        imTh = zeros(Nx, Ny, Nc);
+        for c = 1:Nc
+            imTh(:, :, c) = l1wavelet(imSpirit(:, :, c), beta);
+        end
+
+        MrCur = fft2cStack(imTh);
+        imr(:, :, :, it) = imTh;
+        Mr(:, :, :, it) = MrCur;
+    end
+end
+\end{lstlisting}
+
+\section{Part 9: Ten Iterations of $\ell_1$-SPIRiT}
+For the final experiment, $\ell_1$-SPIRiT was run for 10 iterations using the same calibrated SPIRiT kernel and the same $\beta=\BetaLoneSpirit$. The last iteration gives PSNR $=\PSNRLoneSpiritLast$ dB and SSIM $=\SSIMLoneSpiritLast$.
+
+\begin{figure}[H]
+\centering
+\maybeinclude[width=0.45\linewidth]{outputs/part9_psnr_iterations.png}
+\hfill
+\maybeinclude[width=0.45\linewidth]{outputs/part9_ssim_iterations.png}
+\caption{PSNR and SSIM versus $\ell_1$-SPIRiT iteration number.}
+\end{figure}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{cccc}
+\toprule
+Iteration & $\beta$ & PSNR (dB) & SSIM \\
+\midrule
+1 & \BetaLoneSpirit & 28.23 & 0.7904 \\
+2 & \BetaLoneSpirit & 29.59 & 0.8047 \\
+3 & \BetaLoneSpirit & 30.24 & 0.8090 \\
+4 & \BetaLoneSpirit & 30.68 & 0.8111 \\
+5 & \BetaLoneSpirit & 30.97 & 0.8119 \\
+6 & \BetaLoneSpirit & 31.17 & 0.8121 \\
+7 & \BetaLoneSpirit & 31.31 & 0.8118 \\
+8 & \BetaLoneSpirit & 31.41 & 0.8114 \\
+9 & \BetaLoneSpirit & 31.48 & 0.8108 \\
+10 & \BetaLoneSpirit & 31.54 & 0.8101 \\
+\bottomrule
+\end{tabular}
+\caption{Quantitative results for 10 $\ell_1$-SPIRiT iterations.}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\maybeinclude[width=0.42\linewidth]{outputs/part9_last_sos.png}
+\hfill
+\maybeinclude[width=0.42\linewidth]{outputs/part9_last_error.png}
+\caption{Last $\ell_1$-SPIRiT SoS image and error.}
+\end{figure}
+
+The $\ell_1$-SPIRiT reconstruction improves over the zero-filled image, but with the selected $3\times3$ kernel and fixed $\beta$ it remains below the SPIRiT-only result in PSNR and SSIM. PSNR increases monotonically from 28.23 dB to 31.54 dB, so the iterative process is still moving the reconstruction closer to the reference in a mean-square-error sense. SSIM, however, reaches its maximum around iteration 6 and then decreases slightly. This behavior is consistent with a constant wavelet threshold: repeated soft-thresholding keeps suppressing small coefficients, which can remove incoherent artifacts but can also reduce fine anatomical texture. The result suggests that a smaller $\beta$, a decreasing $\beta$ schedule, or a larger SPIRiT kernel could improve the final balance between sparsity and structural fidelity.
+
+\paragraph{Relevant code.}
+\begin{lstlisting}
+[imL1All, ML1All] = l1spirit(Mu, mask, kernel, betaL1Spirit, Niter);
+psnrL1 = zeros(Niter, 1);
+ssimL1 = zeros(Niter, 1);
+
+for it = 1:Niter
+    l1SosIt = normalizeByP95(sosCombine(imL1All(:, :, :, it)));
+    [psnrL1(it), ssimL1(it)] = computeQuality(l1SosIt, refSos, max_val);
+end
+
+l1LastSos = normalizeByP95(sosCombine(imL1All(:, :, :, Niter)));
+errL1Last = abs(l1LastSos - refSos);
+
+saveMetricPlot(psnrL1, 'PSNR (dB)', fullfile(outDir, 'part9_psnr_iterations.png'), ...
+    'Part 9: l1-SPIRiT PSNR versus iteration');
+saveMetricPlot(ssimL1, 'SSIM', fullfile(outDir, 'part9_ssim_iterations.png'), ...
+    'Part 9: l1-SPIRiT SSIM versus iteration');
+saveImageFigure(l1LastSos, [0 max_val], fullfile(outDir, 'part9_last_sos.png'), ...
+    'Part 9: Last l1-SPIRiT iteration SoS image');
+saveImageFigure(errL1Last, [0 0.2*max_val], fullfile(outDir, 'part9_last_error.png'), ...
+    'Part 9: Last l1-SPIRiT iteration absolute error');
+\end{lstlisting}
+
+\section{Conclusion}
+The experiment demonstrates the progression from zero-filled random undersampling to wavelet denoising, SPIRiT reconstruction, and iterative $\ell_1$-SPIRiT. Random undersampling produces incoherent artifacts, wavelet thresholding suppresses sparse-domain noise-like components, and SPIRiT uses multi-coil neighborhood consistency to estimate missing k-space values. In these results, iterative SPIRiT with data consistency gives the strongest quantitative performance, while $\ell_1$-SPIRiT still improves substantially over zero-fill. The final quantitative comparison is saved in \texttt{outputs/results\_table.csv}, and the console log is saved in \texttt{outputs/console\_output.txt}.
+
+\clearpage
+\section{Shared Helper Functions}
+The main reconstruction functions were shown under their corresponding parts. The shared helper functions used for centered FFTs, SoS combination, normalization, data quality metrics, and zero-padded neighbor shifts are listed below.
+
+\begin{lstlisting}
+function M = fft2cStack(im)
+    M = zeros(size(im));
+    for c = 1:size(im, 3)
+        M(:, :, c) = fft2c(im(:, :, c));
+    end
+end
+
+function im = ifft2cStack(M)
+    im = zeros(size(M));
+    for c = 1:size(M, 3)
+        im(:, :, c) = ifft2c(M(:, :, c));
+    end
+end
+
+function M = fft2c(im)
+    M = fftshift(fft2(ifftshift(im)));
+end
+
+function im = ifft2c(M)
+    im = fftshift(ifft2(ifftshift(M)));
+end
+
+function out = shift2dZero(in, dx, dy)
+    [Nx, Ny] = size(in);
+    out = zeros(Nx, Ny);
+
+    dstX = max(1, 1 - dx):min(Nx, Nx - dx);
+    dstY = max(1, 1 - dy):min(Ny, Ny - dy);
+    srcX = dstX + dx;
+    srcY = dstY + dy;
+
+    out(dstX, dstY) = in(srcX, srcY);
+end
+
+function sos = sosCombine(im)
+    sos = sqrt(sum(abs(im).^2, 3));
+end
+
+function imn = normalizeByP95(im)
+    p95 = prctile(abs(im(:)), 95);
+    if p95 == 0
+        imn = abs(im);
+    else
+        imn = abs(im) / p95;
+    end
+end
+
+function [p, s] = computeQuality(imTest, imRef, maxVal)
+    testMetric = double(imTest) / maxVal;
+    refMetric = double(imRef) / maxVal;
+    mseVal = mean((testMetric(:) - refMetric(:)).^2);
+    if mseVal == 0
+        p = Inf;
+    else
+        p = 10 * log10(1 / mseVal);
+    end
+    s = ssim(testMetric, refMetric, 'DynamicRange', 1);
+end
+\end{lstlisting}
+
+\end{document}
