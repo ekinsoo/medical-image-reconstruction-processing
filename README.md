@@ -1,36 +1,24 @@
 # Medical Image Reconstruction and Processing
 
-Coursework and a course project for EEE 475 Medical Image Reconstruction and Processing. The repository includes homework implementations and reports covering MRI sampling, k-space processing, non-Cartesian reconstruction, system-matrix reconstruction, parallel imaging, compressed sensing, and a deep-learning evaluation project for accelerated MRI.
+Coursework for **EEE 475/575: Medical Image Reconstruction and Processing** at Bilkent University. The repository contains homework submissions and the team report for a course project on accelerated MRI reconstruction.
 
-Author: Ozgur Ekin Sonmez
+## Repository layout
 
-## Contents
+- `homeworks/HW1` — Fourier-domain reconstruction and k-space sampling.
+- `homeworks/HW2` — radial and spiral sampling, gridding, and density compensation.
+- `homeworks/HW3` — system-matrix reconstruction and iterative methods.
+- `homeworks/HW4` — parallel MRI, including SENSE and GRAPPA experiments.
+- `homeworks/HW5` — compressed-sensing MRI and wavelet-based reconstruction.
+- `project` — the course project report.
 
-| Folder | Topic | Summary |
-| --- | --- | --- |
-| `homeworks/HW1` | Fourier and k-space reconstruction | Basic MR image reconstruction, sampling behavior, zero filling, and POCS-style experiments. |
-| `homeworks/HW2` | Non-Cartesian reconstruction | MATLAB implementations for radial/spiral trajectories, gridding, density compensation, and filtered backprojection. |
-| `homeworks/HW3` | Linear-system reconstruction | System-matrix based reconstruction, singular-value analysis, TSVD, and iterative methods. |
-| `homeworks/HW4` | Parallel MRI | Multi-coil reconstruction with SENSE/GRAPPA-style experiments and g-factor analysis. |
-| `homeworks/HW5` | Compressed sensing MRI | L1-SPIRiT and wavelet-based reconstruction experiments in MATLAB. |
-| `project` | ReconFormer evaluation | Evaluation workflow for a pre-trained ReconFormer model on accelerated MRI reconstruction. |
+## Course project
 
-## Project Highlight: ReconFormer Evaluation
+**ReconFormer: Evaluation of a Recurrent Transformer for Accelerated MRI Reconstruction** evaluates the authors' pre-trained model on 30 scans (1,059 slices) from the fastMRI single-coil knee validation set. The report compares acceleration factors 4 and 8 using PSNR, SSIM, and NMSE. It also describes the evaluation setup, compatibility changes, qualitative results, limitations, individual contributions, and generative AI disclosure.
 
-The course project evaluates ReconFormer, a transformer-based model for accelerated MRI reconstruction, using pre-trained weights and a subset of the fastMRI single-coil knee validation data. The work focuses on inference, compatibility updates for modern PyTorch, metric reporting, and qualitative comparison figures for different acceleration factors.
+The project did not train the model or independently run the D5C5 baseline; those published baseline values are cited in the report. The dataset, checkpoints, and upstream ReconFormer code are not included in this repository.
 
-Key files:
+- [MIR project report](project/MIR_Project.pdf)
 
-- `project/ReconFormer_Eval.ipynb`: evaluation notebook.
-- `project/ReconFormer_WorkflowUpdated.md`: reproducible workflow and implementation notes.
-- `project/qualitativeResults.pdf`: qualitative reconstruction comparisons.
-- `project/quantitativeResults.pdf`: PSNR, SSIM, and NMSE summary.
-- `project/ReconFormer_Professor_Ready_Presentation.pptx`: presentation deck.
+## Tools used
 
-## Tech Stack
-
-MATLAB, Python, Jupyter, NumPy, PyTorch, fastMRI-style MRI data processing, LaTeX.
-
-## Notes
-
-Large raw datasets, `.mat` measurement files, fastMRI `.h5` data, generated output folders, archives, compiled MATLAB binaries, and old Git metadata are intentionally excluded. The repository keeps the code, notebooks, reports, and project documentation needed to understand the work without making the repo unnecessarily large.
+MATLAB, Python, Jupyter, PyTorch, and LaTeX.
