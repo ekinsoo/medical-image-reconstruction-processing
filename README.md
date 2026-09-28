@@ -1,36 +1,34 @@
 # Medical Image Reconstruction and Processing
 
-Coursework and a course project for EEE 475 Medical Image Reconstruction and Processing. The repository includes homework implementations and reports covering MRI sampling, k-space processing, non-Cartesian reconstruction, system-matrix reconstruction, parallel imaging, compressed sensing, and a deep-learning evaluation project for accelerated MRI.
+Coursework for **EEE 475: Medical Image Reconstruction and Processing** at Özyeğin University. This repository collects homework submissions and a course project evaluating a pre-trained model for accelerated MRI reconstruction.
 
-Author: Ozgur Ekin Sonmez
+**Author:** Ozgur Ekin Sonmez
 
-## Contents
+## Repository layout
 
-| Folder | Topic | Summary |
-| --- | --- | --- |
-| `homeworks/HW1` | Fourier and k-space reconstruction | Basic MR image reconstruction, sampling behavior, zero filling, and POCS-style experiments. |
-| `homeworks/HW2` | Non-Cartesian reconstruction | MATLAB implementations for radial/spiral trajectories, gridding, density compensation, and filtered backprojection. |
-| `homeworks/HW3` | Linear-system reconstruction | System-matrix based reconstruction, singular-value analysis, TSVD, and iterative methods. |
-| `homeworks/HW4` | Parallel MRI | Multi-coil reconstruction with SENSE/GRAPPA-style experiments and g-factor analysis. |
-| `homeworks/HW5` | Compressed sensing MRI | L1-SPIRiT and wavelet-based reconstruction experiments in MATLAB. |
-| `project` | ReconFormer evaluation | Evaluation workflow for a pre-trained ReconFormer model on accelerated MRI reconstruction. |
+- `homeworks/HW1` — Fourier-domain MRI reconstruction and sampling experiments.
+- `homeworks/HW2` — radial and spiral trajectories, gridding, and density compensation.
+- `homeworks/HW3` — system-matrix reconstruction and iterative methods.
+- `homeworks/HW4` — parallel MRI experiments, including SENSE/GRAPPA methods.
+- `homeworks/HW5` — compressed-sensing MRI and wavelet-based reconstruction.
+- `project` — ReconFormer evaluation notebook, experiment notes, results, and presentation.
 
-## Project Highlight: ReconFormer Evaluation
+Each homework folder contains the submitted report and, where available, the code or notebook used for the work. Some folders also contain assignment PDFs and supplementary files.
 
-The course project evaluates ReconFormer, a transformer-based model for accelerated MRI reconstruction, using pre-trained weights and a subset of the fastMRI single-coil knee validation data. The work focuses on inference, compatibility updates for modern PyTorch, metric reporting, and qualitative comparison figures for different acceleration factors.
+## Course project: ReconFormer evaluation
 
-Key files:
+The project runs inference with published pre-trained ReconFormer weights on 30 scans from the fastMRI single-coil knee validation set. It compares acceleration factors 4 and 8 using PSNR, SSIM, and NMSE, and includes example visual comparisons.
 
-- `project/ReconFormer_Eval.ipynb`: evaluation notebook.
-- `project/ReconFormer_WorkflowUpdated.md`: reproducible workflow and implementation notes.
-- `project/qualitativeResults.pdf`: qualitative reconstruction comparisons.
-- `project/quantitativeResults.pdf`: PSNR, SSIM, and NMSE summary.
-- `project/ReconFormer_Professor_Ready_Presentation.pptx`: presentation deck.
+This is an evaluation of an existing model; the model was not trained as part of this project. The dataset, pretrained weights, and upstream ReconFormer source code are not included. The notebook and workflow notes document the evaluation and compatibility changes used in the Colab run.
 
-## Tech Stack
+Project files:
 
-MATLAB, Python, Jupyter, NumPy, PyTorch, fastMRI-style MRI data processing, LaTeX.
+- [Evaluation notebook](project/ReconFormer_Eval.ipynb)
+- [Workflow and implementation notes](project/ReconFormer_WorkflowUpdated.md)
+- [Qualitative results](project/qualitativeResults.pdf)
+- [Quantitative results](project/quantitativeResults.pdf)
+- [Presentation](project/ReconFormer_Professor_Ready_Presentation.pptx)
 
-## Notes
+## Tools
 
-Large raw datasets, `.mat` measurement files, fastMRI `.h5` data, generated output folders, archives, compiled MATLAB binaries, and old Git metadata are intentionally excluded. The repository keeps the code, notebooks, reports, and project documentation needed to understand the work without making the repo unnecessarily large.
+MATLAB, Python, Jupyter, NumPy, SciPy, PyTorch, scikit-image, and LaTeX.
