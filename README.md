@@ -1,34 +1,24 @@
 # Medical Image Reconstruction and Processing
 
-Coursework for **EEE 475: Medical Image Reconstruction and Processing** at Özyeğin University. This repository collects homework submissions and a course project evaluating a pre-trained model for accelerated MRI reconstruction.
-
-**Author:** Ozgur Ekin Sonmez
+Coursework for **EEE 475/575: Medical Image Reconstruction and Processing** at Bilkent University. The repository contains homework submissions and the team report for a course project on accelerated MRI reconstruction.
 
 ## Repository layout
 
-- `homeworks/HW1` — Fourier-domain MRI reconstruction and sampling experiments.
-- `homeworks/HW2` — radial and spiral trajectories, gridding, and density compensation.
+- `homeworks/HW1` — Fourier-domain reconstruction and k-space sampling.
+- `homeworks/HW2` — radial and spiral sampling, gridding, and density compensation.
 - `homeworks/HW3` — system-matrix reconstruction and iterative methods.
-- `homeworks/HW4` — parallel MRI experiments, including SENSE/GRAPPA methods.
+- `homeworks/HW4` — parallel MRI, including SENSE and GRAPPA experiments.
 - `homeworks/HW5` — compressed-sensing MRI and wavelet-based reconstruction.
-- `project` — ReconFormer evaluation notebook, experiment notes, results, and presentation.
+- `project` — the course project report.
 
-Each homework folder contains the submitted report and, where available, the code or notebook used for the work. Some folders also contain assignment PDFs and supplementary files.
+## Course project
 
-## Course project: ReconFormer evaluation
+**ReconFormer: Evaluation of a Recurrent Transformer for Accelerated MRI Reconstruction** evaluates the authors' pre-trained model on 30 scans (1,059 slices) from the fastMRI single-coil knee validation set. The report compares acceleration factors 4 and 8 using PSNR, SSIM, and NMSE. It also describes the evaluation setup, compatibility changes, qualitative results, limitations, individual contributions, and generative AI disclosure.
 
-The project runs inference with published pre-trained ReconFormer weights on 30 scans from the fastMRI single-coil knee validation set. It compares acceleration factors 4 and 8 using PSNR, SSIM, and NMSE, and includes example visual comparisons.
+The project did not train the model or independently run the D5C5 baseline; those published baseline values are cited in the report. The dataset, checkpoints, and upstream ReconFormer code are not included in this repository.
 
-This is an evaluation of an existing model; the model was not trained as part of this project. The dataset, pretrained weights, and upstream ReconFormer source code are not included. The notebook and workflow notes document the evaluation and compatibility changes used in the Colab run.
+- [MIR project report](project/MIR_Project.pdf)
 
-Project files:
+## Tools used
 
-- [Evaluation notebook](project/ReconFormer_Eval.ipynb)
-- [Workflow and implementation notes](project/ReconFormer_WorkflowUpdated.md)
-- [Qualitative results](project/qualitativeResults.pdf)
-- [Quantitative results](project/quantitativeResults.pdf)
-- [Presentation](project/ReconFormer_Professor_Ready_Presentation.pptx)
-
-## Tools
-
-MATLAB, Python, Jupyter, NumPy, SciPy, PyTorch, scikit-image, and LaTeX.
+MATLAB, Python, Jupyter, PyTorch, and LaTeX.
